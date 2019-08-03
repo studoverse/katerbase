@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.moshbit.katerbase"
-version = "0.0.2"
+version = "0.1.0"
 
 repositories {
   mavenCentral()
@@ -14,7 +14,13 @@ repositories {
 
 dependencies {
   implementation(kotlin("stdlib-jdk8"))
+
   compile("org.mongodb:mongo-java-driver:3.9.1")
+
+  compile("com.fasterxml.jackson.core:jackson-core:2.9.8")
+  compile("com.fasterxml.jackson.module:jackson-module-kotlin:2.9.8")
+
+  compile("ch.qos.logback:logback-classic:1.2.3")
 }
 
 tasks.withType<KotlinCompile> {
