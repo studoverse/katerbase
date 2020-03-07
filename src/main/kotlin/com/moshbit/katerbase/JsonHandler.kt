@@ -143,7 +143,7 @@ object JsonHandler {
         val list = tree[property.name]?.filter { !it.isNull } ?: return@forEach
         if (tree[property.name].size() != list.size) {
           println("Array ${property.name} in ${clazz.simpleName} contains null, but is a non-nullable collection: _id=${getId()}")
-          tree[property.name] = ArrayNode(null, list)
+          tree.set<ArrayNode>(property.name, ArrayNode(null, list))
         }
       }
 
@@ -168,7 +168,7 @@ object JsonHandler {
           }
           return@mapNotNull null
         }
-        tree[property.name] = ArrayNode(null, validValues.map { TextNode(it) })
+        tree.set<ArrayNode>(property.name, ArrayNode(null, validValues.map { TextNode(it) }))
       }
     }
 
