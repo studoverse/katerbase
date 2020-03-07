@@ -21,10 +21,19 @@ dependencies {
   compile("com.fasterxml.jackson.module:jackson-module-kotlin:2.9.8")
 
   compile("ch.qos.logback:logback-classic:1.2.3")
+
+  testImplementation("org.junit.jupiter:junit-jupiter:5.6.0")
 }
 
 tasks.withType<KotlinCompile> {
   kotlinOptions.jvmTarget = "1.8"
+}
+
+tasks.test {
+  useJUnitPlatform()
+  testLogging {
+    events("passed", "skipped", "failed")
+  }
 }
 
 publishing {
