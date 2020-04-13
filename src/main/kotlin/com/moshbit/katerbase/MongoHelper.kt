@@ -1,10 +1,11 @@
 package com.moshbit.katerbase
 
-import com.mongodb.client.model.Indexes
+import com.mongodb.client.model.*
 import org.bson.Document
 import org.bson.conversions.Bson
 import java.util.*
 import java.util.regex.Pattern
+import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
 import kotlin.reflect.KParameter
 import kotlin.reflect.KTypeParameter
@@ -15,12 +16,32 @@ abstract class MongoEntry {
 
 abstract class MongoSubEntry : MongoEntry()
 
+abstract class MongoAggregationEntry : MongoEntry()
+
 abstract class MongoMainEntry : MongoEntry() {
   @Suppress("PropertyName") // MongoDBs id field is named "_id", so allow it here too.
   var _id: String = ""
 
   override fun equals(other: Any?): Boolean = other === this || (other as? MongoMainEntry)?._id == this._id
   override fun hashCode(): Int = _id.hashCode()
+
+  fun randomId(): String = MongoMainEntry.randomId()
+
+  fun generateId(compoundValue: String, vararg compoundValues: String): String = MongoMainEntry.generateId(compoundValue, *compoundValues)
+
+  companion object {
+    private val random = Random()
+
+    internal fun randomId(): String {
+      val bytes = ByteArray(size = 16) // 16 * 8 = 256 -> full entropy for sha256
+      random.nextBytes(bytes)
+      return bytes.sha256().take(32)
+    }
+
+    internal fun generateId(compoundValue: String, vararg compoundValues: String): String {
+      return compoundValues.joinToString(separator = "|", prefix = "$compoundValue|").sha256().take(32)
+    }
+  }
 }
 
 @Suppress("UNCHECKED_CAST")
@@ -33,7 +54,6 @@ private fun Any?.toBSONDocument(): Any? = when (this) {
   is Map<*, *> -> this.map { (key, value) -> (key as String) to value.toBSONDocument() }.toMap(Document())
   is MongoEntry -> this.toBSONDocument()
   is SubDocumentListFilter -> Document("\$elemMatch", filter.toFilterDocument())
-  is SubDocumentClassFilter -> this // Handle this in toFilterDocument()
   else -> throw IllegalArgumentException("${this.javaClass.simpleName} is not BSON compatible, if you want to put this class in Mongo it should be a MongoEntry!")
 }
 
@@ -49,10 +69,6 @@ fun Array<out MongoPair>.toFilterDocument(): Document {
         value.forEach { innerKey, innerValue -> innerBson[innerKey] = innerValue }
         bson[key.name] = innerBson // Add merged Document to outer Document
       }
-      is SubDocumentClassFilter -> // append every key-value pair to the main json but prefix the parent key
-        value.filter.forEach { (innerKey, innerValue) ->
-          bson.append(key.name + "." + innerKey.name, innerValue)
-        }
       else -> bson[key.name] = value
     }
   }
@@ -60,24 +76,11 @@ fun Array<out MongoPair>.toFilterDocument(): Document {
 }
 
 class SubDocumentListFilter(vararg val filter: FilterPair)
-class SubDocumentClassFilter(vararg val filter: FilterPair)
 
 typealias MongoEntryField<T> = KMutableProperty1<out MongoEntry, T>
 typealias NullableMongoEntryField<T> = KMutableProperty1<out MongoEntry, T?>
 
 fun <Value> MongoEntryField<Value>.toMongoField() = MongoField(name)
-
-/**
- * Use this if you have a nested Class or a map structure as subdocument
- */
-fun MongoEntryField<out MongoSubEntry>.childFilter(vararg filter: FilterPair): FilterPair {
-  return FilterPair(this, SubDocumentClassFilter(*filter))
-}
-
-@JvmName("childFilterOnNullable")
-fun NullableMongoEntryField<out MongoSubEntry>.childFilter(vararg filter: FilterPair): FilterPair {
-  return FilterPair(this, SubDocumentClassFilter(*filter))
-}
 
 /**
  * Use this if you want to access a subdocument's field
@@ -146,11 +149,17 @@ class MongoField(val name: String) {
 
   fun descending(): Bson = Indexes.descending(name)
 
+  // https://docs.mongodb.com/manual/text-search/#text-index
+  fun textIndex(): Bson = Indexes.text(name)
+
   fun extend(name: String) = MongoField(this.name + '.' + name)
   fun extendWithCursor(name: String) = MongoField(this.name + ".$." + name)
 
   fun <Class, Type> toProperty(): KMutableProperty1<Class, Type> = FakeProperty(name)
   val fieldName: String get() = name.takeLastWhile { it != '.' }
+
+  override fun equals(other: Any?): Boolean = (other as? MongoField)?.name == name
+  override fun hashCode(): Int = name.hashCode()
 }
 
 abstract class MongoPair(val key: MongoField, val value: Any?) {
@@ -252,6 +261,7 @@ fun <Value> MongoEntryField<Value>.inRange(start: Value, end: Value, includeStar
     if (includeEnd) putAll(Document("\$lte", end)) else putAll(Document("\$lt", end))
   })
 
+// Keep in mind that this query can't be indexed (unless using probably a space index)
 fun <Value> MongoEntryField<Value>.exists(value: Boolean = true) = FilterPair(this, Document("\$exists", value))
 
 // MutatorPair
@@ -261,13 +271,112 @@ infix fun <Value> MongoEntryField<Value>.valueDocument(value: Document) = Mutato
 // PushPair
 infix fun <Value> MongoEntryField<List<Value>>.valueDocument(value: Document) = PushPair(this, value)
 
-// Logical operators
+// Global operators
 // These should look like this: find({$or:[{_id: "1"}, {_id: "2"}]})
 // They can be combined like this: find({$or:[{_id: "1"}, {$and:[{name: "test"}, {_id: "2"}]}]})
 // Bind these to MongoDatabase so they are "not so global"
 
+// Logical operators
 @Suppress("DEPRECATION", "unused")
 fun MongoDatabase.or(vararg filter: FilterPair) = FilterPair(MongoField("\$or"), filter.map { arrayOf(it).toFilterDocument() })
 
 @Suppress("DEPRECATION", "unused")
 fun MongoDatabase.and(vararg filter: FilterPair) = FilterPair(MongoField("\$and"), filter.map { arrayOf(it).toFilterDocument() })
+
+// This call requires a Text Index https://docs.mongodb.com/manual/text-search/#text-operator
+// All fields that are defined as Text Index in this collection are searched.
+@Suppress("DEPRECATION")
+infix fun MongoDatabase.searchText(value: String) = FilterPair(MongoField("\$text"), Document("\$search", value))
+
+// Aggregation
+fun aggregationPipeline(block: AggregationPipeline.() -> Unit): AggregationPipeline = AggregationPipeline().apply { block() }
+
+class AggregationPipeline {
+  val bson: MutableList<Bson> = mutableListOf()
+
+  fun match(vararg filter: FilterPair) {
+    bson += Aggregates.match(filter.toFilterDocument())
+  }
+
+  fun group(field: MongoEntryField<*>, block: Accumulation.() -> Unit) {
+    val accumulators = Accumulation().apply { block() }.accumulators
+    bson += Aggregates.group("\$${field.name}", accumulators.map { it.bsonField })
+  }
+
+  // Use this when you want to simly just include some of the fields
+  fun project(vararg selectedFields: MongoEntryField<*>) {
+    bson += Aggregates.project(selectedFields.includeBson())
+  }
+
+  // Use this when you want to transform the document
+  inline fun <reified InputType : MongoEntry, reified OutputType : MongoAggregationEntry> transform(noinline block: Transformation<InputType, OutputType>.() -> Unit) {
+    transform(
+      transformation = Transformation(InputType::class, OutputType::class),
+      block = block
+    )
+  }
+
+  fun <InputType : MongoEntry, OutputType : MongoAggregationEntry> transform(
+    transformation: Transformation<InputType, OutputType>,
+    block: Transformation<InputType, OutputType>.() -> Unit
+  ) {
+    bson += Aggregates.project(transformation.apply { block() }.bson)
+  }
+
+  fun sortBy(field: MongoEntryField<*>) {
+    bson += Aggregates.sort(Document(field.name, 1))
+  }
+
+  fun sortByDescending(field: MongoEntryField<*>) {
+    bson += Aggregates.sort(Document(field.name, -1))
+  }
+
+  class Accumulation {
+    val accumulators: MutableList<Accumulator> = mutableListOf()
+
+    class Accumulator(val bsonField: BsonField)
+
+    fun sum(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+      accumulators += Accumulator(bsonField = Accumulators.sum(field.name, "\$${value.name}"))
+    }
+
+    fun average(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+      accumulators += Accumulator(bsonField = Accumulators.avg(field.name, "\$${value.name}"))
+    }
+
+    fun max(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+      accumulators += Accumulator(bsonField = Accumulators.max(field.name, "\$${value.name}"))
+    }
+
+    fun min(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+      accumulators += Accumulator(bsonField = Accumulators.min(field.name, "\$${value.name}"))
+    }
+
+    fun count(field: MongoEntryField<out Number>) {
+      accumulators += Accumulator(bsonField = Accumulators.sum(field.name, 1))
+    }
+
+    @Deprecated("Use only for hacks")
+    fun addAccumulator(bsonField: BsonField) {
+      accumulators += Accumulator(bsonField)
+    }
+  }
+
+  class Transformation<InputType : MongoEntry, OutputType : MongoAggregationEntry>(
+    val inputClass: KClass<InputType>,
+    val outputClass: KClass<OutputType>
+  ) {
+    private val projections: MutableList<Bson> = mutableListOf()
+    val bson: Bson get() = Projections.fields(projections)
+
+    fun include(field: KMutableProperty1<InputType, *>) {
+      projections += Projections.include(field.name)
+    }
+
+    // We can't use InputType for inputField here because inputFied can also be a child document type of a MongoMainEntry,
+    // just ensure the field values have the same type
+    fun <FieldValueType> project(inputField: MongoEntryField<FieldValueType>, outputField: KMutableProperty1<OutputType, FieldValueType>) {
+      projections += Projections.computed(outputField.name, "\$${inputField.name}")
+    }
+  }
+}

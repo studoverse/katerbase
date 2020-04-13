@@ -1,8 +1,10 @@
 package com.moshbit.katerbase
 
 import com.fasterxml.jackson.core.JsonProcessingException
+import com.mongodb.client.AggregateIterable
 import com.mongodb.client.DistinctIterable
 import com.mongodb.client.FindIterable
+import com.mongodb.client.MongoIterable
 import com.mongodb.client.model.Sorts
 import org.bson.BsonDocument
 import org.bson.BsonInt32
@@ -14,25 +16,16 @@ class DistinctCursor<Entry : Any>(val mongoIterable: DistinctIterable<Entry>, pr
   override fun iterator(): Iterator<Entry> = mongoIterable.iterator()
 }
 
+class AggregateCursor<Entry : Any>(val mongoIterable: AggregateIterable<Document>, private val clazz: KClass<Entry>) : Iterable<Entry> {
+  override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
+}
+
 class FindCursor<Entry : MongoMainEntry>(
   val mongoIterable: FindIterable<Document>,
   private val clazz: KClass<Entry>,
   private val collection: MongoDatabase.MongoCollection<Entry>
 ) : Iterable<Entry> {
-  override fun iterator() = object : Iterator<Entry> {
-    val mongoIterator = mongoIterable.iterator()
-
-    override fun hasNext(): Boolean = mongoIterator.hasNext()
-
-    override fun next(): Entry {
-      val document = mongoIterator.next()
-      return try {
-        JsonHandler.fromBson(document, clazz)
-      } catch (e: JsonProcessingException) {
-        throw IllegalArgumentException("Could not deserialize mongo entry of type ${clazz.simpleName} with id ${document["_id"]}", e)
-      }
-    }
-  }
+  override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
 
   private var limit = 0
   private var skip = 0
@@ -75,7 +68,7 @@ class FindCursor<Entry : MongoMainEntry>(
   }
 
   @Deprecated(
-    "Excluding fields is an anti-pattern and is totally not maintainable. Always use selected fields. " +
+    "Excluding fields is an anti-pattern and is not maintainable. Always use selected fields. " +
         "You can also structure your db-object into sub-objects so you only need to select one field."
   )
   fun <T> excludeFields(vararg fields: MongoEntryField<out T>): FindCursor<Entry> = apply {
@@ -137,20 +130,38 @@ class FindCursor<Entry : MongoMainEntry>(
     val filterGetter = Class.forName("com.mongodb.client.internal.FindIterableImpl").declaredFields
       .find { it.name == "filter" }!!
       .apply { isAccessible = true }
-
-    private fun BsonDocument.combine(other: BsonDocument): BsonDocument {
-      other.forEach { (key, value) ->
-        this.remove(key)
-        this[key] = value
-      }
-      return this
-    }
-
-    private fun combineBsonWithValue(keys: List<String>, value: Int) = BsonDocument().apply {
-      keys.forEach { key -> this.append(key, BsonInt32(value)) }
-    }
-
-    private fun <T> Array<out MongoEntryField<out T>>.includeBson() = combineBsonWithValue(map { it.toMongoField().name }, value = 1)
-    private fun <T> Array<out MongoEntryField<out T>>.excludeBson() = combineBsonWithValue(map { it.toMongoField().name }, value = 0)
   }
 }
+
+private fun <Entry : Any> iteratorForDocumentClass(
+  mongoIterable: MongoIterable<out Document>,
+  clazz: KClass<Entry>
+): Iterator<Entry> = object : Iterator<Entry> {
+  val mongoIterator = mongoIterable.iterator()
+
+  override fun hasNext(): Boolean = mongoIterator.hasNext()
+
+  override fun next(): Entry {
+    val document = mongoIterator.next()
+    return try {
+      JsonHandler.fromBson(document, clazz)
+    } catch (e: JsonProcessingException) {
+      throw IllegalArgumentException("Could not deserialize mongo entry of type ${clazz.simpleName} with id ${document["_id"]}", e)
+    }
+  }
+}
+
+fun BsonDocument.combine(other: BsonDocument): BsonDocument {
+  other.forEach { (key, value) ->
+    this.remove(key)
+    this[key] = value
+  }
+  return this
+}
+
+fun combineBsonWithValue(keys: List<String>, value: Int) = BsonDocument().apply {
+  keys.forEach { key -> this.append(key, BsonInt32(value)) }
+}
+
+fun <T> Array<out MongoEntryField<out T>>.includeBson() = combineBsonWithValue(map { it.toMongoField().name }, value = 1)
+fun <T> Array<out MongoEntryField<out T>>.excludeBson() = combineBsonWithValue(map { it.toMongoField().name }, value = 0)

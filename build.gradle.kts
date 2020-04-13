@@ -22,6 +22,8 @@ dependencies {
 
   implementation("ch.qos.logback:logback-classic:1.2.3")
 
+  implementation("commons-codec:commons-codec:1.14")
+
   testImplementation("org.junit.jupiter:junit-jupiter:5.6.0")
 }
 

@@ -87,6 +87,8 @@ object JsonHandler {
     }
   }
 
+  fun <T : Any> toJsonString(payload: T): String = mongoJacksonMapper.writeValueAsString(payload)
+
   fun transformBsonDocument(doc: MutableMap<String, Any?>, transform: (String, Any) -> Any?) {
     @Suppress("UNCHECKED_CAST")
     doc.entries.forEach { entry ->
