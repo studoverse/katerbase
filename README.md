@@ -92,22 +92,94 @@ The Kotlin model class must inherit from `MongoMainEntry`, therefore `Movie` als
 Currently, the library is not yet published to Maven Central, to use Katerbase download this Git repository and add the Kotlin files manually to your project. The library will be published to Maven Central at a later point.
 
 
-## Operators
+## Collection Operators
 
-TODO
+The following operators can be executed on a collection, for example `database.getCollection<Movie>.find()`.
 
-#### find
-The [db.collection.find() MongoDB operation](https://docs.mongodb.com/manual/reference/method/db.collection.find/) translates t
+### find
+`fun find(vararg filter: FilterPair): FindCursor<Entry>`
+
+[db.collection.find(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.find/) MongoDB operation
+
+Example usage:
+```
+col.find()
+col.find(Book::_id equal "the_hobbit")
+col.find(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
+```
+
+[List of all supported filter modifiers](#filter-modifiers).
+
+The returned `FindCursor` is an `Iterable`. Before iterating though the objects further operations can be applied to the `FindCursor`:
+
+* `limit(limit: Int)` - [cursor.limit](https://docs.mongodb.com/manual/reference/method/cursor.limit/)
+* `skip(skip: Int)` - [cursor.skip](https://docs.mongodb.com/manual/reference/method/cursor.skip/)
+* `hint(index: MongoCollection.MongoIndex)` - [cursor.hint](https://docs.mongodb.com/manual/reference/method/cursor.hint/)
+* `selectedFields(vararg fields: MongoEntryField)` - [projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/)
+* `excludedFields(vararg fields: MongoEntryField)` - [projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/): Excluding fields is an anti-pattern and is not maintainable. Always try to use `selectedFields`
+* `projection(bson: Bson)` - [projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/): Direct `Bson` access, use only if selectedFields or excludedFields are insufficient
+* `sortBy(field: MongoEntryField)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/)
+* `sortByDescending(field: MongoEntryField)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/)
+* `sort(bson: Bson)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/): direct `Bson` access, use only if sortBy or sortByDescending are insufficient
+
+The order of the `FindCursor` operators do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should be iterated only once, as each iteration creates network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in case you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
+
+Example usage:
+```
+val books: Iterable<Book> = col.find(Book::author equal "Tokien")
+    .selectedFields(Book::author, Book::yearPublished)
+    .sortByDescending(Book::yearPublished)
+    .skip(20)
+    .limit(10)
+```
 
 
-#### Update modifiers
-* lambda -> if statements within update operation
+### findOne
+`fun findOne(vararg filter: FilterPair): Entry?`
 
+[db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) MongoDB operation
+
+In contrast to `find()`, the `findOne()` operation in gets immediately executed on the database, and the retuned value is the actual Kotlin object.
+ 
+`findOne(filter)` is implemented by `find(*filter).limit(1).firstOrNull()`. So all filter operators from [find](#find) apply here too, cursor operators can't be used. If you need to call `findOne` with additional cursor operators, just use `find` with `limit(1)` and `firstOrNull`.
+
+TODO all other operations
+
+### drop
+
+`col.drop() -> Unit`
+
+[db.collection.drop()](https://docs.mongodb.com/manual/reference/method/db.collection.drop/) MongoDB operation
+
+This command is only available if connecting to a local databases due to the destructive impact of this command.
+
+
+### clear
+
+`col.clear() -> Unit` ([db.collection.clear()](https://docs.mongodb.com/manual/reference/method/db.collection.clear/) MongoDB operation)
+
+This command is only available if connecting to a local databases due to the destructive impact of this command.
+
+
+### watch
+* TODO
+
+## Filter modifiers
+* TODO equal, notEqual, lower, any, or...
+* TODO child, childWithCursor
+* TODO FindCursor: selectedFields, limit...
+
+
+## Update modifiers
+* TODO setTo, child, childWithCurosor, unset, seetOnInsert, incrementBy, push (2x), pull, pullWhere...
+* TODO lambda -> if statements within update operation
+* TODO bulk operations
 
 
 ### Indexes
 
-* Creation (multiple microservices)
+* TODO Creation (multiple microservices)
+* TODO all following types
 
 #### Simple index
 
@@ -149,10 +221,6 @@ Deprecated BSON types are not supported by Katerbase and are here omitted.
 
 [MongoDB field names](https://docs.mongodb.com/manual/core/document/#field-names) must be of type String, therefore nested Maps must be of the type `Map<String, *>`,. Collections can be `List<*>`, `Set<*>` or any other collection that is serializable and deserializable by Jackson. `*` must be a Kotlin type listed in the table above.
 
-#### Null handling
-
-All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined`, then the Kotlin model has an additional field, see [additional Kotlin field](#additional-kotlin-field). If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
-
 #### Kotlin fields
 
 By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jvm/-transient/) field annotation, a field can be marked no not being serialized, therefore it won't get stored in the MongoDB document. [Getters and setters](https://kotlinlang.org/docs/reference/properties.html#getters-and-setters) won't get serialized or deserialized by Katerbase. Also, functions within the Kotlin model class will be ignored by the serialization and deserialization. All kind of field visibility modifiers are acceptable, so it does not matter if a field of a Kotlin model is `public`, `internal`, `protected` or `private`.
@@ -174,12 +242,13 @@ A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "a
 
 #### Double and Float
 
+
 #### String and Enum
+
 
 #### List, Set and other Collections
 
-#### Undefined
-* null vs undefined
-* default field values
-* unset()
-* migrations and deployment of multiple microservices with the same database
+
+#### Null and undefined
+
+All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined`, then the Kotlin model has an additional field, see [additional Kotlin field](#additional-kotlin-field). If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
