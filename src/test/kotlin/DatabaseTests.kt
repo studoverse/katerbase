@@ -1,8 +1,7 @@
 import com.mongodb.client.model.Indexes
 import com.moshbit.katerbase.*
 import org.bson.Document
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import util.addYears
@@ -31,8 +30,15 @@ class DatabaseTests {
   }
 
   class SimpleMongoPayload : MongoMainEntry() {
-    var double = 0.0
+    var double = 3.0
+    var string = ""
     var stringList: List<String> = emptyList()
+  }
+
+  class NullableSimpleMongoPayload : MongoMainEntry() {
+    var double: Double? = null
+    var string: String? = null
+    var stringList: List<String?>? = null
   }
 
   @Test
@@ -428,6 +434,24 @@ class DatabaseTests {
     }
   }
 
+  @Test
+  fun nullableTest() {
+    val payload = NullableSimpleMongoPayload().apply { _id = "nullableTest" }
+    testDb.getCollection<NullableSimpleMongoPayload>().insertOne(payload, upsert = true)
+    assertNotNull(testDb.getCollection<NullableSimpleMongoPayload>().findOne(NullableSimpleMongoPayload::_id equal "nullableTest"))
+    val simpleMongoPayload = testDb.getCollection<SimpleMongoPayload>().findOne(SimpleMongoPayload::_id equal "nullableTest")!!
+
+    // Known limitation: SimpleMongoPayload.string is not nullable, but due to the Jackson deserialization we throw a NPE on access.
+    try {
+      println(simpleMongoPayload.string.length)
+      assert(false)
+    } catch (e: NullPointerException) {
+      assert(true)
+    }
+
+    testDb.getCollection<NullableSimpleMongoPayload>().deleteOne(NullableSimpleMongoPayload::_id equal "testId")
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 
@@ -441,7 +465,8 @@ class DatabaseTests {
 
         override fun getCollections(): Map<out KClass<out MongoMainEntry>, String> = mapOf(
           EnumMongoPayload::class to "enumColl",
-          SimpleMongoPayload::class to "simpleMongoColl"
+          SimpleMongoPayload::class to "simpleMongoColl",
+          NullableSimpleMongoPayload::class to "simpleMongoColl" // Use the same underlying mongoDb collection as SimpleMongoPayload
         )
 
 

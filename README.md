@@ -70,7 +70,7 @@ var database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase"
 
 ### Collection Setup
 
-Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin class model to the `override fun getCollections()`.
+Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin model class to the `override fun getCollections()`.
  
 ```kotlin
 class Movie : MongoMainEntry() {
@@ -84,7 +84,7 @@ class Movie : MongoMainEntry() {
 }
 ```
 
-The Kotlin class model must inherit from `MongoMainEntry`, therefore `Movie` also has a `var _id: String` field. Only `MongoMainEntry` objects can be inserted and queried from the MongoDB. MongoDB [embedded/nested documents](https://docs.mongodb.com/manual/tutorial/query-embedded-documents/) must inherit from `MongoSubEntry` to explicitly opt-in into the serialization and deserialization of this subdocument class.
+The Kotlin model class must inherit from `MongoMainEntry`, therefore `Movie` also has a `var _id: String` field. Only `MongoMainEntry` objects can be inserted and queried from the MongoDB. MongoDB [embedded/nested documents](https://docs.mongodb.com/manual/tutorial/query-embedded-documents/) must inherit from `MongoSubEntry` to explicitly opt-in into the serialization and deserialization of this subdocument class.
 
 
 ### Installation
@@ -115,8 +115,13 @@ The [db.collection.find() MongoDB operation](https://docs.mongodb.com/manual/ref
 
 ### Text index
 
+### Custom options
+
+
 
 ### Type mapping
+
+#### Field types
 
 Katerbase supports the following Kotlin types that are stored in a MongoDB document, see also [MongoDB BSON Types](https://docs.mongodb.com/manual/reference/bson-types/).
 
@@ -130,7 +135,7 @@ Katerbase supports the following Kotlin types that are stored in a MongoDB docum
 | ObjectId      | -             |
 | Boolean       | Boolean       |
 | Date          | Date          |
-| Null          | Null          |
+| Null          | null          |
 | Regular       | -             |
 | JavaScript    | -             |
 | 32-bit integer| Int           |
@@ -142,6 +147,12 @@ Katerbase supports the following Kotlin types that are stored in a MongoDB docum
 
 Deprecated BSON types are not supported by Katerbase and are here omitted.
 
+[MongoDB field names](https://docs.mongodb.com/manual/core/document/#field-names) must be of type String, therefore nested Maps must be of the type `Map<String, *>`,. Collections can be `List<*>`, `Set<*>` or any other collection that is serializable and deserializable by Jackson. `*` must be a Kotlin type listed in the table above.
+
+#### Null handling
+
+All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined`, then the Kotlin model has an additional field, see [additional Kotlin field](#additional-kotlin-field). If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
+
 #### Kotlin fields
 
 By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jvm/-transient/) field annotation, a field can be marked no not being serialized, therefore it won't get stored in the MongoDB document. [Getters and setters](https://kotlinlang.org/docs/reference/properties.html#getters-and-setters) won't get serialized or deserialized by Katerbase. Also, functions within the Kotlin model class will be ignored by the serialization and deserialization. All kind of field visibility modifiers are acceptable, so it does not matter if a field of a Kotlin model is `public`, `internal`, `protected` or `private`.
@@ -149,14 +160,14 @@ By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jv
 
 #### Missing Kotlin field
 
-MongoDB collections can be [schemaless](https://www.mongodb.com/blog/post/why-schemaless), although [document schemas](https://docs.mongodb.com/stitch/mongodb/document-schemas/) can be enforced. In case the MonoDB document has properties that do not have a corresponding Kotlin field, the property will just be ignored on deserialization. This is useful when adding fields in the MongoDB document but the updated Kotlin models are not yet deployed.
+MongoDB collections can be [schemaless](https://www.mongodb.com/blog/post/why-schemaless), although [document schemas](https://docs.mongodb.com/stitch/mongodb/document-schemas/) can be enforced. In case the MonoDB document has properties that do not have a corresponding Kotlin field, the *property will be ignored* on deserialization. This is useful when adding fields in the MongoDB document if the updated Kotlin models are not yet deployed.
 
 A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [], website: "https://example.org"}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[]`.
 
 
 #### Additional Kotlin field
 
-In case the MongoDB document does not have a property value that is defined in the Kotlin model, the default field content will be used. This is useful when adding fields to Kotlin models but the MongoDB documents are not yet migrated.
+In case the MongoDB document does not have a property value that is defined in the Kotlin model, respectively the MongoDB property is `undefined, the *default field value* will be used. This is useful when adding fields to Kotlin models if the MongoDB documents are not yet migrated.
 
 A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "actorname"}, {birthday: ISODate(0)}]}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[Actor(name=actorname, birthday=null), Actor(name=, birthday=Date(0))]`.
 
