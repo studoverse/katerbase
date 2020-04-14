@@ -1,7 +1,7 @@
 # Katerbase
 
-Katerbase is a Kotlin wrapper for the [MongoDB Java Drivers](http://mongodb.github.io/mongo-java-driver/) to provide idiomatic Kotlin support for MongoDB.
-It's goal is to write concise and simple MongoDB queries without any boilerplate or ceremony. IDE autocompletion and type safety allow you to start writing MongoDB queries, even if you haven't used the MongoDB query syntax before.
+Katerbase [keɪtərbeɪs] is a Kotlin wrapper for the [MongoDB Java Drivers](http://mongodb.github.io/mongo-java-driver/) to provide idiomatic Kotlin support for MongoDB.
+Its goal is to write concise and simple MongoDB queries without any boilerplate or ceremony. IDE autocompletion and type safety allow you to start writing MongoDB queries, even if you haven't used the MongoDB query syntax before.
 
 Katerbase has object mapping built in, so queried data from MongoDB get deserialized by 
 [Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin objects.
@@ -20,26 +20,26 @@ class Book : MongoMainEntry() {
 
 val col = database.getCollection<Book>()
 
-// MongoDB JS-syntax: db.collection.insertOne({_id: "the_hobbit", author: "J.R.R. Tolkien", name: "The Hobbit"})
+// MongoDB JS syntax: db.collection.insertOne({_id: "the_hobbit", author: "Tolkien", name: "The Hobbit"})
 col.insertOne(Book().apply {
   _id = "the_hobbit"
-  author = "J.R.R. Tolkien"
+  author = "Tolkien"
   name = "The Hobbit"
 }, upsert = false)
 
-// MongoDB JS-syntax: db.collection.find({author: "J.R.R. Tolkien"})
-val tolkienBooks: Iterable<Book> = col.find(Book::author equal "J.R.R. Tolkien")
+// MongoDB JS syntax: db.collection.find({author: "Tolkien"})
+val tolkienBooks: Iterable<Book> = col.find(Book::author equal "Tolkien")
 
-// MongoDB JS-syntax: db.collection.updateOne({_id: "the_hobbit"}, {yearPublished: 1937}, {upsert: false})
+// MongoDB JS syntax: db.collection.updateOne({_id: "the_hobbit"}, {yearPublished: 1937}, {upsert: false})
 col.updateOne(Book::_id equal "the_hobbit") {
   Book::yearPublished setTo 1937
 }
 
-// MongoDB JS-syntax: db.collection.findOne({author: "J.R.R. Tolkien", yearPublished: {$lte: 1940}})
-val oldTolkienBook: Book? = col.findOne(Book::author equal "J.R.R. Tolkien", Book::yearPublished lowerEquals 1940)
+// MongoDB JS syntax: db.collection.findOne({author: "Tolkien", yearPublished: {$lte: 1940}})
+val book: Book? = col.findOne(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
 ```
 
-Check out the *Operators* section for all supported MongoDB operations and examples. 
+Check out the [operators](#operators) section for all supported MongoDB operations and examples. 
 
 ### Database Setup
 
@@ -54,10 +54,10 @@ var database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase"
 
   override fun getIndexes() {
     with(getCollection<Movie>()) {
-      createIndex(Movie::name.toMongoField().ascending()) // TODO text index
+      createIndex(Movie::name.toMongoField().textIndex())
     }
     with(getCollection<User>()) {
-      createIndex(User::email.toMongoField().ascending()) // TODO unique index
+      createIndex(User::email.toMongoField().ascending(), customOptions = { unique(true) })
       createIndex(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
     }
   }
@@ -70,7 +70,7 @@ var database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase"
 
 ### Collection Setup
 
-Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin class model to the `override fun getCollections()`. T
+Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin class model to the `override fun getCollections()`.
  
 ```kotlin
 class Movie : MongoMainEntry() {
@@ -84,7 +84,7 @@ class Movie : MongoMainEntry() {
 }
 ```
 
-The Kotlin class model must inherit from `MongoMainEntry`, therefore `Movie` also has a `var _id: String` field. Only `MongoMainEntrie` objects can be inserted and queried from the MongoDB. MongoDB [embedded/nested documents](https://docs.mongodb.com/manual/tutorial/query-embedded-documents/) must inherit from `MongoSubEntry` to explicitly opt-in into the serialization and deserialization of this subdocument class.
+The Kotlin class model must inherit from `MongoMainEntry`, therefore `Movie` also has a `var _id: String` field. Only `MongoMainEntry` objects can be inserted and queried from the MongoDB. MongoDB [embedded/nested documents](https://docs.mongodb.com/manual/tutorial/query-embedded-documents/) must inherit from `MongoSubEntry` to explicitly opt-in into the serialization and deserialization of this subdocument class.
 
 
 ### Installation
@@ -144,7 +144,7 @@ Deprecated BSON types are not supported by Katerbase and are here omitted.
 
 #### Kotlin fields
 
-By using the [Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jvm/-transient/) field annotation, a field can be marked no not being serialized, therefore it won't get stored in the MongoDB document. [Getters and setters](https://kotlinlang.org/docs/reference/properties.html#getters-and-setters) won't get serialized or deserialized by Katerbase. Also, functions within the Kotlin model class will be ignored by the serialization and deserialization. All kind of field visibility modifiers are acceptable, so it does not matter if a field of a Kotlin model is `public`, `internal`, `protected` or `private`.
+By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jvm/-transient/) field annotation, a field can be marked no not being serialized, therefore it won't get stored in the MongoDB document. [Getters and setters](https://kotlinlang.org/docs/reference/properties.html#getters-and-setters) won't get serialized or deserialized by Katerbase. Also, functions within the Kotlin model class will be ignored by the serialization and deserialization. All kind of field visibility modifiers are acceptable, so it does not matter if a field of a Kotlin model is `public`, `internal`, `protected` or `private`.
 
 
 #### Missing Kotlin field

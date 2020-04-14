@@ -116,10 +116,10 @@ class MoviesExample {
 
         override fun getIndexes() {
           with(getCollection<Movie>()) {
-            createIndex(Movie::name.toMongoField().ascending()) // TODO text index
+            createIndex(Movie::name.toMongoField().textIndex())
           }
           with(getCollection<User>()) {
-            createIndex(User::email.toMongoField().ascending()) // TODO unique index
+            createIndex(User::email.toMongoField().ascending(), customOptions = { unique(true) })
             createIndex(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
           }
         }
