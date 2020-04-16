@@ -39,7 +39,7 @@ col.updateOne(Book::_id equal "the_hobbit") {
 val book: Book? = col.findOne(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
 ```
 
-Check out the [operators](#operators) section for all supported MongoDB operations and examples. 
+Check out the [read operations](#read-operations) and [write operation](#write-operations) sections for all supported MongoDB operations and examples. 
 
 ### Database Setup
 
@@ -92,7 +92,7 @@ The Kotlin model class must inherit from `MongoMainEntry`, therefore `Movie` als
 Currently, the library is not yet published to Maven Central, to use Katerbase download this Git repository and add the Kotlin files manually to your project. The library will be published to Maven Central at a later point.
 
 
-## Collection Operators
+## Read operations
 
 The following operators can be executed on a collection, for example `database.getCollection<Movie>.find()`.
 
@@ -144,18 +144,74 @@ In contrast to `find()`, the `findOne()` operation in gets immediately executed 
 `findOne(filter)` is implemented by `find(*filter).limit(1).firstOrNull()`. So all filter operators from [find](#find) apply here too, cursor operators can't be used. If you need to call `findOne` with additional cursor operators, just use `find` with `limit(1)` and `firstOrNull`.
 
 
-### `findOneOrCreate`
-`fun findOneOrCreate(vararg filter: FilterPair, setWithId: Boolean = false, newEntry: () -> Entry): Entry`
+### findDocuments
+`fun findDocuments(vararg filter: FilterPair): FindIterable<Document>`
+
+[db.collection.find(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.find/) MongoDB operation
+
+`findDocuments()` returns a `FindIterable<Document>` in contrast to `find()` which returns a `FindCursor<Entry>`. So no type mapping is done, and instead of using the Katerbase find-operations like `limit()` the mongo-java-driver operaations of the FindIterable can be used. `Document` is in package `org.bson.Document` of the mongo-java-driver library and implements `Map<String, Object>, Serializable, Bson`. `FindIterable` is in package `com.mongodb.client` of the mongo-java-driver library and inherits from `MongoIterable<TResult>` which inherits from `Iterable<TResult>`.
+
+By using `findDocuments()` Katerbase offers direct access to the mongo-java-driver for all edge-cases that Katerbase doesn't supports. The MongoDB documentation for [FindIterable](https://mongodb.github.io/mongo-java-driver/3.12/driver/tutorials/perform-read-operations/#finditerable) explains all supported methods you can chain to the `findDocuments()`  operation.
+
+### count
+`fun count(vararg filter: FilterPair): Long`
+
+### distinct
+`fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>`
+
+In case `T` can not be reified, pass the `entryClass` to the overloaded function
+`fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClazz: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
+
+Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) that happens when using Kotlin-NewInference starting at Kotlin 1.3.60, this function might not be callable, therefore you can use meanwhile the function `fun <reified T : Any> distinct_mitigateCompilerBug(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>` as workaround. Kotlin 1.4 should fix this compiler bug.
+
+
+## Write operations
+
+TODO
+
+### updateOne
+`fun updateOne(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
+
+TODO
+
+
+### updateMany
+`fun updateMany(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
+
+TODO
+
+
+### updateOneAndFind
+`fun updateOneAndFind(vararg filter: FilterPair, upsert: Boolean = false, update: UpdateOperation.() -> Unit): Entry?`
+
+TODO
+
+
+### insertOne
+`insertOne(document: Entry, upsert: Boolean)` and
+`fun insertOne(document: Entry, onDuplicateKey: (() -> Unit))`
+
+TODO
+
+
+### insertMany
+`fun insertMany(documents: List<Entry>, upsert: Boolean)`
+
+TODO
+
+
+### findOneOrInsert
+`fun findOneOrInsert(vararg filter: FilterPair, setWithId: Boolean = false, newEntry: () -> Entry): Entry`
 
 [db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) and [db.collection.findOneAndUpdate(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOneAndUpdate/) MongoDB operation
 
-Find the document or in case the filtered document does not exist insert a new document. The document is returned matter if it exists previously or it was just inserted. This works atomically, so `newEntry` may be called even if the document exists during the `findOneOrCreate` operation. In that case the document won't get created but the already existent document will be returned.
+Find the document or in case the filtered document does not exist insert a new document. The document is returned matter if it exists previously or it was just inserted. This works atomically, so `newEntry` may be called even if the document exists during the `findOneOrInsert` operation. In that case the document won't get created but the already existent document will be returned.
 
-`findOneOrCreate()` uses internally at first `find()` to look up a document. In case the document is not found, it will execute the `findOneAndUpdate` MongoDB operation. This is a performance optimization, when using `findOneAndUpdate` the MongoDB document is locked, but when using `find()` the document won't get locked. So in case the document can be found, MongoDB won't use any locks. In case the document won't get found via `find()`, `findOneOrCreate` will use internally the `updateOneAndFind` MongoDB operation with `upsert = true` parameter to insert the document or just return the existent document.
+`findOneOrInsert()` uses internally at first `find()` to look up a document. In case the document is not found, it will execute the `findOneAndUpdate` MongoDB operation. This is a performance optimization, when using `findOneAndUpdate` the MongoDB document is locked, but when using `find()` the document won't get locked. So in case the document can be found, MongoDB won't use any locks. In case the document won't get found via `find()`, `findOneOrInsert` will use internally the `updateOneAndFind` MongoDB operation with `upsert = true` parameter to insert the document or just return the existent document.
 
-Example usage 1:
+#### Example usage with _id filter:
 ```kotlin
-val book = collection.findOneOrCreate(Book::_id equal "the_hobbit") {
+val book = collection.findOneOrInsert(Book::_id equal "the_hobbit") {
   Book().apply {
     // // On inserting a new document, _id will be used from the filter query, so "the_hobbit" in this case
     name = "The inserted Hobbit"
@@ -166,10 +222,9 @@ val book = collection.findOneOrCreate(Book::_id equal "the_hobbit") {
 `book._id` is always "the_hobbit", no matter if the document was inserted or already existed.
 `book.name` is "The inserted Hobbit" in case the document was just inserted, or whatever it was before in case it already existed.
 
-
-Example usage 2:
+#### Example usage without _id filter:
 ```kotlin
-val book = collection.findOneOrCreate(Book::name equal "The Hobbit", Book::author equal "Tolkien") {
+val book = collection.findOneOrInsert(Book::name equal "The Hobbit", Book::author equal "Tolkien") {
   Book().apply {
     _id = "the_new_inserted_hobbit"
     // On inserting a new document, name and author will be used from the filter query.
@@ -179,10 +234,20 @@ val book = collection.findOneOrCreate(Book::name equal "The Hobbit", Book::autho
 `book._name` is always "The Hobbit" and `book.author` is always "Tokien", no matter if the document was inserted or already existed.
 `book._id` is "the_new_inserted_hobbit" in case the document was just inserted, or whatever it was before in case it already existed.
 
-TODO all other operations
+
+### deleteOne
+`fun deleteOne(vararg filter: FilterPair): DeleteResult`
+
+TODO
+
+
+#### deleteMany
+`fun deleteMany(vararg filter: FilterPair): DeleteResult`
+
+TODO
+
 
 ### drop
-
 `col.drop() -> Unit`
 
 [db.collection.drop()](https://docs.mongodb.com/manual/reference/method/db.collection.drop/) MongoDB operation
@@ -191,43 +256,69 @@ This command is only available if connecting to a local databases due to the des
 
 
 ### clear
+`col.clear() -> Unit`
 
-`col.clear() -> Unit` ([db.collection.clear()](https://docs.mongodb.com/manual/reference/method/db.collection.clear/) MongoDB operation)
+[db.collection.clear()](https://docs.mongodb.com/manual/reference/method/db.collection.clear/) MongoDB operation
 
 This command is only available if connecting to a local databases due to the destructive impact of this command.
 
 
-### watch
-* TODO
+## Other operators
 
-## Filter modifiers
+### aggregate
+`fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClazz: KClass<T>): AggregateCursor<T>` and
+`fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T>`
+
+
+### watch
+
+TODO
+
+
+## Filter operators
 * TODO equal, notEqual, lower, any, or...
 * TODO child, childWithCursor
 * TODO FindCursor: selectedFields, limit...
 
 
-## Update modifiers
+## Update operators
 * TODO setTo, child, childWithCurosor, unset, seetOnInsert, incrementBy, push (2x), pull, pullWhere...
 * TODO lambda -> if statements within update operation
-* TODO bulk operations
+
+## Bulk operations
+
+TOOD
 
 
 ### Indexes
-
-* TODO Creation (multiple microservices)
+`fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, customOptions: (IndexOptions.() -> Unit)? = null)`
+* TODO Creation (multiple microservices): `createIndexes()`
 * TODO all following types
+* TODO getIndex for hinting
 
 #### Simple index
 
+TODO
+
+
 ### Compound index
+
+TODO
+
 
 ### Text index
 
+TODO
+
+
 ### Custom options
 
+TODO
 
 
 ### Type mapping
+
+Katerbase supports currently for the queried documents type mapping with Jackson.
 
 #### Field types
 
@@ -256,6 +347,7 @@ Katerbase supports the following Kotlin types that are stored in a MongoDB docum
 Deprecated BSON types are not supported by Katerbase and are here omitted.
 
 [MongoDB field names](https://docs.mongodb.com/manual/core/document/#field-names) must be of type String, therefore nested Maps must be of the type `Map<String, *>`,. Collections can be `List<*>`, `Set<*>` or any other collection that is serializable and deserializable by Jackson. `*` must be a Kotlin type listed in the table above.
+
 
 #### Kotlin fields
 
@@ -288,3 +380,18 @@ A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "a
 #### Null and undefined
 
 All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined`, then the Kotlin model has an additional field, see [additional Kotlin field](#additional-kotlin-field). If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
+
+
+## Database configuration
+TODO
+* createMongoClientFromUri
+* logAllQueries
+* uri
+* allowReadFromSecondaries
+* supportChangeStreams
+* createNonExistentCollections
+* localMode (better naming, local does not mean development)
+* immutable mongoCollections
+
+TODO implement
+* logging

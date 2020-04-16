@@ -139,14 +139,14 @@ class DatabaseTests {
   }
 
   @Test
-  fun multithreadedFindOneOrCreate() {
+  fun multithreadedFindOneOrInsert() {
     val id = "multicreateid"
     val value = EnumMongoPayload.Enum1.VALUE2
     var createNewCalls = 0
     testDb.getCollection<EnumMongoPayload>().drop()
     (1..50).forEachAsync {
       (1..500).forEach {
-        val result = testDb.getCollection<EnumMongoPayload>().findOneOrCreate(EnumMongoPayload::_id equal id) {
+        val result = testDb.getCollection<EnumMongoPayload>().findOneOrInsert(EnumMongoPayload::_id equal id) {
           createNewCalls++
           EnumMongoPayload().apply { this.value1 = value }
         }
@@ -196,7 +196,7 @@ class DatabaseTests {
     range.forEachAsync { index ->
       val id = idPrefix + index
       collection.deleteOne(EnumMongoPayload::_id equal id)
-      collection.findOneOrCreate(EnumMongoPayload::_id equal id) { EnumMongoPayload() }
+      collection.findOneOrInsert(EnumMongoPayload::_id equal id) { EnumMongoPayload() }
       assert(collection.findOne(EnumMongoPayload::_id equal id) != null)
       collection.deleteOne(EnumMongoPayload::_id equal id)
     }

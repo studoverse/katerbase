@@ -321,7 +321,7 @@ abstract class MongoDatabase(
 
     // Single operators
     @Deprecated("Use only for hacks", ReplaceWith("find"))
-    fun rawFind(vararg filter: FilterPair): FindIterable<Document> {
+    fun findDocuments(vararg filter: FilterPair): FindIterable<Document> {
       return collection.find(filter.toFilterDocument())
     }
 
@@ -354,7 +354,7 @@ abstract class MongoDatabase(
 
     // Returns a document or inserts the document and then returns it.
     // This works atomically, so newEntry may be called even if the document exists
-    fun findOneOrCreate(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
+    fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
 
       // This is a performance optimization, when using updateOneAndFind the document is locked
