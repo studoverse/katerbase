@@ -33,7 +33,9 @@ import kotlin.reflect.full.memberProperties
  */
 
 abstract class MongoDatabase(
-  uri: String, allowReadFromSecondaries: Boolean = false, private val supportChangeStreams: Boolean = false,
+  uri: String,
+  allowReadFromSecondaries: Boolean = false,
+  private val supportChangeStreams: Boolean = false,
   createNonExistentCollections: Boolean = false
 ) {
   protected val isReplicaSet: Boolean
@@ -82,7 +84,7 @@ abstract class MongoDatabase(
     } else emptyMap()
 
     if (createNonExistentCollections) {
-      // Create collections which doesnt exist
+      // Create collections which don't exist
       val newCollections = this.getCollections()
         .filter { it.value !in database.listCollectionNames() }
 
@@ -720,11 +722,6 @@ abstract class MongoDatabase(
     var logAllQueries = false // Set this to true if you want to debug your database queries
     private fun Document.asJsonString() = JsonHandler.toJsonString(this)
     private val ConnectionString.isMultiNodeSetup get() = hosts.size > 1 // true if replication or sharding is in place TODO @Z implement this correctly
-
-    @JvmStatic
-    protected val kiloByte = 1024L
-    @JvmStatic
-    protected val megaByte = 1024L * 1024L
 
     fun createMongoClientFromUri(
       connectionString: ConnectionString,
