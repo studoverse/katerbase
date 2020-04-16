@@ -258,15 +258,14 @@ TODO
 
 [db.collection.drop()](https://docs.mongodb.com/manual/reference/method/db.collection.drop/) MongoDB operation
 
-This command is only available if connecting to a local databases due to the destructive impact of this command.
-
+TODO
 
 ### clear
 `col.clear() -> Unit`
 
 [db.collection.clear()](https://docs.mongodb.com/manual/reference/method/db.collection.clear/) MongoDB operation
 
-This command is only available if connecting to a local databases due to the destructive impact of this command.
+TODO
 
 
 ## Other operators
@@ -319,7 +318,13 @@ TODO
 TODO
 
 
-### Custom options
+
+### Partial index
+
+TODO
+
+
+### Index options
 
 TODO
 
@@ -400,6 +405,7 @@ TODO
 * createNonExistentCollections
 * localMode (better naming, local does not mean development)
 * immutable mongoCollections
+* capped collections
 
 TODO implement
 * logging

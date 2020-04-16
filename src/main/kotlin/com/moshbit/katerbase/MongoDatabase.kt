@@ -36,7 +36,6 @@ abstract class MongoDatabase(
   uri: String, allowReadFromSecondaries: Boolean = false, private val supportChangeStreams: Boolean = false,
   createNonExistentCollections: Boolean = false
 ) {
-  private val localMode: Boolean = "localhost" in uri || "127.0.0.1" in uri
   protected val isReplicaSet: Boolean
   protected val client: MongoClient
   protected val database: MongoDatabase
@@ -110,16 +109,13 @@ abstract class MongoDatabase(
       this.getIndexes() // Only create indexes in memory but do not actually create it in mongodb, because we need them when using hints
     }
 
-    if (localMode) {
-      thread {
-        mongoCollections.keys.forEach { mongoEntryClass ->
-          mongoEntryClass.java.declaredFields.forEach { field ->
-            fun errorMessage(msg: String) = "Field error in ${mongoEntryClass.simpleName} -> ${field.name}: $msg"
-            require(!field.name.startsWith("is")) { errorMessage("Can't start with 'is'") }
-            require(!field.name.startsWith("set")) { errorMessage("Can't start with 'set'") }
-            require(!field.name.startsWith("get")) { errorMessage("Can't start with 'get'") }
-          }
-        }
+    // Validation for Jackson to avoid serialization/deserialization issues
+    mongoCollections.keys.forEach { mongoEntryClass ->
+      mongoEntryClass.java.declaredFields.forEach { field ->
+        fun errorMessage(msg: String) = "Field error in ${mongoEntryClass.simpleName} -> ${field.name}: $msg"
+        require(!field.name.startsWith("is")) { errorMessage("Can't start with 'is'") }
+        require(!field.name.startsWith("set")) { errorMessage("Can't start with 'set'") }
+        require(!field.name.startsWith("get")) { errorMessage("Can't start with 'get'") }
       }
     }
   }
@@ -204,9 +200,9 @@ abstract class MongoDatabase(
 
     // The index name is based on bson and partialIndex. Therefore when changing the bson or the partialIndex, the old index
     // will get deleted and a new index is created.
-    // Keep in mind that changing customOptions do not create a new index, so you need to manually delete the index or modify the index
+    // Keep in mind that changing indexOptions do not create a new index, so you need to manually delete the index or modify the index
     // appropriately in the database.
-    inner class MongoIndex(val bson: Bson, val partialIndex: Document?, val customOptions: (IndexOptions.() -> Unit)?) {
+    inner class MongoIndex(val bson: Bson, val partialIndex: Document?, val indexOptions: (IndexOptions.() -> Unit)?) {
       val indexName: String
 
       init {
@@ -230,21 +226,21 @@ abstract class MongoDatabase(
       }
 
       fun createIndex(): String? = collection.createIndex(bson, IndexOptions()
-        .apply { customOptions?.invoke(this) }
         .background(true)
-        .name(indexName)
         .apply {
           if (partialIndex != null) {
             partialFilterExpression(partialIndex)
           }
         }
+        .apply { indexOptions?.invoke(this) }
+        .name(indexName) // Set name after indexOptions invoke, as our index management relies on that name
       )
     }
 
     private val indexes: MutableList<MongoIndex> = mutableListOf()
 
-    fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, customOptions: (IndexOptions.() -> Unit)? = null) =
-      indexes.add(MongoIndex(bson = index, partialIndex = partialIndex?.toFilterDocument(), customOptions = customOptions))
+    fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null) =
+      indexes.add(MongoIndex(bson = index, partialIndex = partialIndex?.toFilterDocument(), indexOptions = indexOptions))
 
     fun createIndexes() {
       val localIndexes = collection.listIndexes().toList().map { it["name"] as String }
@@ -283,19 +279,11 @@ abstract class MongoDatabase(
     }
 
     fun drop() {
-      if (localMode) {
-        collection.drop()
-      } else {
-        throw IllegalStateException("Dropping a collection on a production server is not supported. Do it with a database client UI.")
-      }
+      collection.drop()
     }
 
     fun clear() {
-      if (localMode) {
-        deleteMany()
-      } else {
-        throw IllegalStateException("Clearing a collection on a production server is not supported. Do it with a database client UI.")
-      }
+      deleteMany()
     }
 
     fun count(vararg filter: FilterPair): Long {
