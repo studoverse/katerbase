@@ -143,6 +143,42 @@ In contrast to `find()`, the `findOne()` operation in gets immediately executed 
  
 `findOne(filter)` is implemented by `find(*filter).limit(1).firstOrNull()`. So all filter operators from [find](#find) apply here too, cursor operators can't be used. If you need to call `findOne` with additional cursor operators, just use `find` with `limit(1)` and `firstOrNull`.
 
+
+### `findOneOrCreate`
+`fun findOneOrCreate(vararg filter: FilterPair, setWithId: Boolean = false, newEntry: () -> Entry): Entry`
+
+[db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) and [db.collection.findOneAndUpdate(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOneAndUpdate/) MongoDB operation
+
+Find the document or in case the filtered document does not exist insert a new document. The document is returned matter if it exists previously or it was just inserted. This works atomically, so `newEntry` may be called even if the document exists during the `findOneOrCreate` operation. In that case the document won't get created but the already existent document will be returned.
+
+`findOneOrCreate()` uses internally at first `find()` to look up a document. In case the document is not found, it will execute the `findOneAndUpdate` MongoDB operation. This is a performance optimization, when using `findOneAndUpdate` the MongoDB document is locked, but when using `find()` the document won't get locked. So in case the document can be found, MongoDB won't use any locks. In case the document won't get found via `find()`, `findOneOrCreate` will use internally the `updateOneAndFind` MongoDB operation with `upsert = true` parameter to insert the document or just return the existent document.
+
+Example usage 1:
+```kotlin
+val book = collection.findOneOrCreate(Book::_id equal "the_hobbit") {
+  Book().apply {
+    // // On inserting a new document, _id will be used from the filter query, so "the_hobbit" in this case
+    name = "The inserted Hobbit"
+    author = "Tolkien"
+  }
+}
+```
+`book._id` is always "the_hobbit", no matter if the document was inserted or already existed.
+`book.name` is "The inserted Hobbit" in case the document was just inserted, or whatever it was before in case it already existed.
+
+
+Example usage 2:
+```kotlin
+val book = collection.findOneOrCreate(Book::name equal "The Hobbit", Book::author equal "Tolkien") {
+  Book().apply {
+    _id = "the_new_inserted_hobbit"
+    // On inserting a new document, name and author will be used from the filter query.
+  }
+}
+```
+`book._name` is always "The Hobbit" and `book.author` is always "Tokien", no matter if the document was inserted or already existed.
+`book._id` is "the_new_inserted_hobbit" in case the document was just inserted, or whatever it was before in case it already existed.
+
 TODO all other operations
 
 ### drop
@@ -228,14 +264,14 @@ By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jv
 
 #### Missing Kotlin field
 
-MongoDB collections can be [schemaless](https://www.mongodb.com/blog/post/why-schemaless), although [document schemas](https://docs.mongodb.com/stitch/mongodb/document-schemas/) can be enforced. In case the MonoDB document has properties that do not have a corresponding Kotlin field, the *property will be ignored* on deserialization. This is useful when adding fields in the MongoDB document if the updated Kotlin models are not yet deployed.
+MongoDB collections can be [schemaless](https://www.mongodb.com/blog/post/why-schemaless), although [document schemas](https://docs.mongodb.com/stitch/mongodb/document-schemas/) can be enforced. In case the MonoDB document has properties that do not have a corresponding Kotlin field, the **property will be ignored** on deserialization. This is useful when adding fields in the MongoDB document if the updated Kotlin models are not yet deployed.
 
 A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [], website: "https://example.org"}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[]`.
 
 
 #### Additional Kotlin field
 
-In case the MongoDB document does not have a property value that is defined in the Kotlin model, respectively the MongoDB property is `undefined, the *default field value* will be used. This is useful when adding fields to Kotlin models if the MongoDB documents are not yet migrated.
+In case the MongoDB document does not have a property value that is defined in the Kotlin model, respectively the MongoDB property is `undefined`, the **default field value** will be used. This is useful when adding fields to Kotlin models if the MongoDB documents are not yet migrated.
 
 A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "actorname"}, {birthday: ISODate(0)}]}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[Actor(name=actorname, birthday=null), Actor(name=, birthday=Date(0))]`.
 

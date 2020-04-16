@@ -312,11 +312,12 @@ abstract class MongoDatabase(
     private fun Document.toClass() = JsonHandler.fromBson(this, entryClazz)
     private fun FindIterable<Document>.toClasses() = FindCursor(this, entryClazz, this@MongoCollection)
 
-    // Returns a MongoDocument as a list of mutators. Useful if you want to set all values in an update block (never set _id)
+    // Returns a MongoDocument as a list of mutators. Useful if you want to set all values in an update block.
+    // In case _id should be included in the mutator, set withId to true.
     private fun Entry.asMutator(withId: Boolean): List<MutatorPair<Any>> = this.toBSONDocument().map { (key, value) ->
       @Suppress("DEPRECATION")
       MutatorPair<Any>(MongoField(key), value)
-    }.let { if (withId) it else it.filter { it.key.name != "_id" } }
+    }.let { mutator -> if (withId) mutator else mutator.filter { it.key.name != "_id" } }
 
     // Single operators
     @Deprecated("Use only for hacks", ReplaceWith("find"))
@@ -352,16 +353,22 @@ abstract class MongoDatabase(
     }
 
     // Returns a document or inserts the document and then returns it.
-    // This works atomically but newEntry may be called even if the document exists
-    fun findOneOrCreate(vararg filter: FilterPair, setWithId: Boolean = false, newEntry: () -> Entry): Entry {
+    // This works atomically, so newEntry may be called even if the document exists
+    fun findOneOrCreate(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
+
       // This is a performance optimization, when using updateOneAndFind the document is locked
       return findOne(*filter) ?: updateOneAndFind(*filter, upsert = true) {
-        @Suppress("DEPRECATION") // Use this because the properties already lost their types to use them as properties
-        setOnInsert(*newEntry().asMutator(withId = setWithId).toTypedArray())
+
+        val setWithId = filter.any { it.key.name == "_id" }
+        val mutator = newEntry().asMutator(withId = setWithId)
+        if (!setWithId) {
+          require(mutator.any { it.key.name == "_id" && it.value != "" }) { "_id must either be in filter or must be set in newEntry()" }
+        }
+
+        mutator.forEach { updateMutator("setOnInsert", it) }
       }!!
     }
-
 
     /**
      * Use this if you need a set of distinct specific value of a document
@@ -403,21 +410,21 @@ abstract class MongoDatabase(
       return collection.updateOne(filter.toFilterDocument(), mutator, UpdateOptions().upsert(false))
     }
 
-    fun updateOneOrCreate(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
-      require(filter.count() == 1 && filter.first().key.name == "_id") {
+    fun updateOneOrCreate(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
+      require(filter.key.name == "_id") {
         "An _id filter must be provided when interacting with only one object and no other filters are allowed to mitigate a DuplicateKeyException on update."
       }
       val mutator = UpdateOperation().apply { update(this) }.mutator
 
       if (logAllQueries) println(buildString {
         append("updateOneOrCreate:\n")
-        append("   filter: ${filter.toFilterDocument().asJsonString()}\n")
+        append("   filter: ${arrayOf(filter).toFilterDocument().asJsonString()}\n")
         append("   mutator: ${mutator.asJsonString()}\n")
-        append("   pipeline: ${filter.getExecutionPipeline()}\n")
+        append("   pipeline: ${arrayOf(filter).getExecutionPipeline()}\n")
       })
 
       return retryMongoOperationOnDuplicateKeyError {
-        collection.updateOne(filter.toFilterDocument(), mutator, UpdateOptions().upsert(true))
+        collection.updateOne(arrayOf(filter).toFilterDocument(), mutator, UpdateOptions().upsert(true))
       }
     }
 
@@ -524,12 +531,7 @@ abstract class MongoDatabase(
       val mutator: Document
         get() = mutatorPairs.map { (op, values) -> "$$op" to values.toTypedArray().toFilterDocument() }.toMap(Document())
 
-      @Deprecated("")
-      private fun updateMutator(mutator: String, mutators: Array<out MongoPair>) {
-        mutatorPairs.getOrPut(mutator) { mutableListOf() }.addAll(mutators)
-      }
-
-      private fun updateMutator(operator: String, mutator: MongoPair) {
+      internal fun updateMutator(operator: String, mutator: MongoPair) {
         mutatorPairs.getOrPut(operator) { mutableListOf() }.add(mutator)
       }
 
@@ -590,11 +592,6 @@ abstract class MongoDatabase(
         @Suppress("DEPRECATION")
         updateMutator(operator = "unset", mutator = UnsetPair(this))
       }
-
-      // TODO do something with this function
-      @Suppress("DEPRECATION")
-      @Deprecated("Use the other setOnInsert syntax")
-      fun setOnInsert(vararg values: MutatorPair<*>) = updateMutator("setOnInsert", values)
 
       /**
        * Use this in combination with [updateOneOrCreate] if you want to set specific fields if a new document is created
