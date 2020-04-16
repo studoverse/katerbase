@@ -39,7 +39,7 @@ col.updateOne(Book::_id equal "the_hobbit") {
 val book: Book? = col.findOne(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
 ```
 
-Check out the [read operations](#read-operations) and [write operation](#write-operations) sections for all supported MongoDB operations and examples. 
+Check out the Katerbase [read operations](#read-operations) and [write operation](#write-operations) sections for all supported MongoDB operations and examples. 
 
 ### Database Setup
 
@@ -156,8 +156,13 @@ By using `findDocuments()` Katerbase offers direct access to the mongo-java-driv
 ### count
 `fun count(vararg filter: FilterPair): Long`
 
+TODO
+
+
 ### distinct
 `fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>`
+
+TODO
 
 In case `T` can not be reified, pass the `entryClass` to the overloaded function
 `fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClazz: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
@@ -168,6 +173,7 @@ Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) th
 ## Write operations
 
 TODO
+
 
 ### updateOne
 `fun updateOne(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
@@ -269,6 +275,8 @@ This command is only available if connecting to a local databases due to the des
 `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClazz: KClass<T>): AggregateCursor<T>` and
 `fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T>`
 
+TODO
+
 
 ### watch
 
@@ -318,7 +326,7 @@ TODO
 
 ### Type mapping
 
-Katerbase supports currently for the queried documents type mapping with Jackson.
+Katerbase supports currently for the queried documents type mapping with [Jackson](https://github.com/FasterXML/jackson-module-kotlin).
 
 #### Field types
 
