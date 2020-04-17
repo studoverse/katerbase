@@ -190,7 +190,7 @@ The following update and delete operations all have a `vararg filter: FilterPair
 
 Updates a single document if matched by `filter` with the specified `update` lambda. The returned [UpdateResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/UpdateResult.html) holds information about the number of documents matched by the query and the number of documents modified by the update.
 
-If the `update` lambda did call any [update operators](#update-operators), the query won't get executed on the database and will instantly return for performance reasons.
+If the `update` lambda did not call any [update operators](#update-operators), the query won't get executed on the database and will instantly return for performance reasons.
 
 #### Example with fixed operators
 ```kotlin
@@ -228,13 +228,15 @@ The `update` argument is not in contrast to the `filter` argument a list of oper
 
 Updates all matched documents in the specified collection. See [updateOne](#updateone).
 
+If the `update` lambda did not call any [update operators](#update-operators), the query won't get executed on the database and will instantly return for performance reasons.
+
 
 ### updateOneAndFind
 `fun updateOneAndFind(vararg filter: FilterPair, upsert: Boolean = false, update: UpdateOperation.() -> Unit): Entry?`
 
 [db.collection.findOneAndUpdate(filter, update, options)](https://docs.mongodb.com/manual/reference/method/db.collection.findOneAndUpdate/) MongoDB operation
 
-Updates a single document and returns the found or inserted entry instead of the `UpdateOperation`. See [updateOne](#updateone).
+Updates a single document and returns the found or inserted entry instead of the `UpdateOperation`. See [updateOne](#updateone) and [find](#find).
 
 When `upsert` is not set and no document can be found for the query `null` is returned.
 
@@ -242,8 +244,8 @@ If `upsert` is set and no document cn be found for the query a new document is c
 
 
 ### insertOne
-`insertOne(document: Entry, upsert: Boolean)` and
-`fun insertOne(document: Entry, onDuplicateKey: (() -> Unit))`
+`insertOne(document: Entry, upsert: Boolean): Unit` and
+`fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): Unit`
 
 [db.collection.insertOne()](https://docs.mongodb.com/manual/reference/method/db.collection.insertOne/) or [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation
 
@@ -280,7 +282,7 @@ TODO remove?
 ### updateOneOrInsert
 `fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
 
-TODO
+TODO remove?
 
 
 ### findOneOrInsert
@@ -321,13 +323,21 @@ val book = collection.findOneOrInsert(Book::name equal "The Hobbit", Book::autho
 ### deleteOne
 `fun deleteOne(vararg filter: FilterPair): DeleteResult`
 
-TODO
+[db.collection.deleteOne()](https://docs.mongodb.com/manual/reference/method/db.collection.deleteOne/) MongoDB operation
+
+Deletes a single document from the collection. The filter must not by empty, otherwise an undefined document will be deleted.
+
+The returned [DeleteResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/DeleteResult.html) holds information about the number of documents deleted, which can be 0 in case no document matched the given query.
 
 
 #### deleteMany
 `fun deleteMany(vararg filter: FilterPair): DeleteResult`
 
-TODO
+[db.collection.deleteMany()](https://docs.mongodb.com/manual/reference/method/db.collection.deleteMany/) MongoDB operation
+
+Deletes a single document from the collection. In case the filter is empty, all documents wil be deleted in the given collection.
+
+The returned [DeleteResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/DeleteResult.html) holds information about the number of documents deleted.
 
 
 ### drop
@@ -335,14 +345,15 @@ TODO
 
 [db.collection.drop()](https://docs.mongodb.com/manual/reference/method/db.collection.drop/) MongoDB operation
 
-TODO
+Removes a collection from the database. When Katerbase is initialized with `createNonExistentCollections = true`, the collection will get automatically created next time the MongoDatabase is initialized with Katerbase.
+
 
 ### clear
 `col.clear() -> Unit`
 
-[db.collection.clear()](https://docs.mongodb.com/manual/reference/method/db.collection.clear/) MongoDB operation
+[db.collection.clear()](https://docs.mongodb.com/manual/reference/method/db.collection.deleteMany/) MongoDB operation
 
-TODO
+Calls [deleteMany](#deleteMany) with no arguments, so all documents in the collection will be deleted.
 
 
 ## Other operators
@@ -372,6 +383,8 @@ TODO
 ## Bulk operations
 
 TOOD
+
+If the `actions` lambda did not call any bulk operations, the query won't get executed on the database and will instantly return for performance reasons.
 
 
 ### Indexes
@@ -460,11 +473,17 @@ A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "a
 
 #### Double and Float
 
+TODO
+
 
 #### String and Enum
 
+TODO
+
 
 #### List, Set and other Collections
+
+TODO
 
 
 #### Null and undefined

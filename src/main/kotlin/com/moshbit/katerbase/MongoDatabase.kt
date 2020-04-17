@@ -284,8 +284,8 @@ abstract class MongoDatabase(
       collection.drop()
     }
 
-    fun clear() {
-      deleteMany()
+    fun clear(): DeleteResult {
+      return deleteMany()
     }
 
     fun count(vararg filter: FilterPair): Long {
@@ -449,6 +449,7 @@ abstract class MongoDatabase(
       return collection.updateMany(filter.toFilterDocument(), mutator)
     }
 
+    // TODO when updating to mongo-java-driver 4.0 return an InsertOneResult instead of Unit
     /** Throws on duplicate key when upsert=false */
     fun insertOne(document: Entry, upsert: Boolean) {
       if (upsert) {
@@ -468,6 +469,7 @@ abstract class MongoDatabase(
       bulkWrite { insertMany(documents, upsert) }
     }
 
+    // TODO when updating to mongo-java-driver 4.0 return an InsertOneResult instead of Unit
     fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)) {
       try {
         collection.insertOne(document.toBSONDocument())
