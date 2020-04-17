@@ -400,14 +400,14 @@ abstract class MongoDatabase(
       return collection.updateOne(filter.toFilterDocument(), mutator, UpdateOptions().upsert(false))
     }
 
-    fun updateOneOrCreate(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
+    fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
       require(filter.key.name == "_id") {
         "An _id filter must be provided when interacting with only one object and no other filters are allowed to mitigate a DuplicateKeyException on update."
       }
       val mutator = UpdateOperation().apply { update(this) }.mutator
 
       if (logAllQueries) println(buildString {
-        append("updateOneOrCreate:\n")
+        append("updateOneOrInsert:\n")
         append("   filter: ${arrayOf(filter).toFilterDocument().asJsonString()}\n")
         append("   mutator: ${mutator.asJsonString()}\n")
         append("   pipeline: ${arrayOf(filter).getExecutionPipeline()}\n")
@@ -584,7 +584,7 @@ abstract class MongoDatabase(
       }
 
       /**
-       * Use this in combination with [updateOneOrCreate] if you want to set specific fields if a new document is created
+       * Use this in combination with [updateOneOrInsert] if you want to set specific fields if a new document is created
        * More info: https://docs.mongodb.com/manual/reference/operator/update/setOnInsert/
        */
       infix fun <Value> MongoEntryField<Value>.setToOnInsert(value: Value) {

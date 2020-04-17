@@ -245,11 +245,40 @@ If `upsert` is set and no document cn be found for the query a new document is c
 `insertOne(document: Entry, upsert: Boolean)` and
 `fun insertOne(document: Entry, onDuplicateKey: (() -> Unit))`
 
-TODO
+[db.collection.insertOne()](https://docs.mongodb.com/manual/reference/method/db.collection.insertOne/) or [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation
+
+Inserts the provided document. See section [type mapping](#type-mapping) for Kotlin serialization details. 
+
+Three different `insertOne` calls can be used, depending on the requried usecase:
+
+#### upsert on duplicate _id
+When calling `insertOne(document = Book().apply { _id = "the_hobbit"; authorName = "X" }, upsert = true)` and a document with the _id "the_hobbit" already exists, the given document will get replaced. Katerbase uses in that case the [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation with the `upsert: true` parameter. In this example the document will have after the transaction `authorName: "X"`, no matter if the
+document previously exited in the MongoDB collection or not.
+
+This is useful if you expect that duplicates might happen, but the newer data should always be used then. 
+
+#### throw on duplicate _id
+When calling `insertOne(document = Book().apply { _id = "the_hobbit" }, upsert = false)` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead a `DuplicateKeyException` will be thrown.
+
+This is useful when you do not expect that duplicates will happen. [Failing fast can reduce debugging’s cost, and pain, significantly](https://www.martinfowler.com/ieeeSoftware/failFast.pdf).
+
+
+#### handle duplicate _id in Kotlin
+When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplicateKey: { ... })` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead the `onDuplicateKey` lamda gets executed.
+
+This is useful if you expect that duplicates might happen, and you can resolve that duplicates on your own by writing Kotlin code and e.g. use an [updateOne](#updateone) operator in the `onDuplicateKey` lambda.
+
+Note that the `onDuplicateKey` lambda is not atomically executed but called after the `insertOne` call at the MongoDB. If you can archive an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert). 
 
 
 ### insertMany
 `fun insertMany(documents: List<Entry>, upsert: Boolean)`
+
+TODO remove?
+
+
+### updateOneOrInsert
+`fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
 
 TODO
 
@@ -457,3 +486,4 @@ TODO
 
 TODO implement
 * logging
+* db.internalCollection<MyEntry>() access instead of db.mongoCollections[MyEntry::class]!! ?
