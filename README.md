@@ -108,6 +108,8 @@ col.find(Book::_id equal "the_hobbit")
 col.find(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
 ```
 
+The order of the `vararg filter: FilterPair` argument does not matter in all Katerbase `filter` arguments. So `col.find(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)` is the same as `col.find(Book::yearPublished lowerEquals 1940, Book::author equal "Tolkien")`.
+
 [List of all supported filter modifiers](#filter-modifiers).
 
 The returned `FindCursor` is an `Iterable`. Before iterating though the objects further operations can be applied to the `FindCursor`:
@@ -156,13 +158,19 @@ By using `findDocuments()` Katerbase offers direct access to the mongo-java-driv
 ### count
 `fun count(vararg filter: FilterPair): Long`
 
-TODO
+[db.collection.count(query, options)](https://docs.mongodb.com/manual/reference/method/db.collection.count/) MongoDB operation
+
+Counts how many matching documents in a collection are. If the filter is empty, [estimatedDocumentCount](https://docs.mongodb.com/manual/reference/method/db.collection.estimatedDocumentCount/) is used which  always results in *O(1)* runtime but the returned count might be out of date. If a filter is specified, [countDocuments](https://docs.mongodb.com/manual/reference/method/db.collection.countDocuments/) with runtime of up to *O(n)* (depending if an index is used or not) is used.
 
 
 ### distinct
 `fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>`
 
-TODO
+[db.collection.distinct()](https://docs.mongodb.com/manual/reference/method/db.collection.distinct/) MongoDB operation
+
+Returns an `Iterable` of the specified field with no duplicates. `col.distinct(Book::author)` returns an `Iterable<String>` with unique Strings. When applying filtering you can get e.g. by `col.distinct(Book::author, Book::yearPublished lower 2000)` all author names that have published at least one book before year 2000.
+
+As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration creates network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` in case you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
 
 In case `T` can not be reified, pass the `entryClass` to the overloaded function
 `fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClazz: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
@@ -172,25 +180,65 @@ Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) th
 
 ## Write operations
 
-TODO
+The following update and delete operations all have a `vararg filter: FilterPair` argument, see [find(vararg filter: FilterPair)](#find). The insert operations deserialize with Jackson the Kotlin class into a MongoDB document. 
 
 
 ### updateOne
 `fun updateOne(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
 
-TODO
+[db.collection.updateOne(filter, update, options)](https://docs.mongodb.com/manual/reference/method/db.collection.updateOne/) MongoDB operation
+
+Updates a single document if matched by `filter` with the specified `update` lambda. The returned [UpdateResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/UpdateResult.html) holds information about the number of documents matched by the query and the number of documents modified by the update.
+
+If the `update` lambda did call any [update operators](#update-operators), the query won't get executed on the database and will instantly return for performance reasons.
+
+#### Example with fixed operators
+```kotlin
+col.updateOne(User::email equal "john.doe@example.com") {
+  User::lastSignIn setTo Date()
+  User::eventHistory push SignInEvent(Date(), browser, authenticationMethod)
+  User::loginCount incrementBy 1
+}
+```
+
+#### Example with dynamic update operators
+```kotlin
+col.updateOne(CronJob::_id equal cronJobId, CronJob::state equal CronJob.State.Running) {
+  CronJob::state setTo CronJob.State.Finished
+
+  if (successfullyFinished) {
+    CronJob::lastFinishDate setTo Date()
+    CronJob::crashCount setTo 0
+  } else {
+    CronJob::lastCrashDate setTo Date()
+    CronJob::crashCount incrementBy 1
+  }
+}
+```
+
+Depending on `successfullyFinished` one of the two if branches will get evaluated when calling the `update` lambda. However, `CronJob::state` will always be set.
+
+The `update` argument is not in contrast to the `filter` argument a list of operations but a true lambda. The `update` lambda puts all [update operators](#update-operators) into a private `MutableMap<String, MutableList<MongoPair>>` inside the currently prepared `UpdateOperation` class. Therefore all update operators like `setTo` or `incrementBy` that are called at runtime will be added to that `MutableMap`. Other update operators that are in this lambda but are not executed will therefore be not seen by the `UpdateOperation`. This API pattern is also known by the official Kotlin [kotlinx.html](https://github.com/Kotlin/kotlinx.html) library and allows an idiomatic Kotlin experience while preparing the update operation. Therefore all Kotlin language features like branches, functions and loops are avilable in the `update` lambda.
 
 
 ### updateMany
 `fun updateMany(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
 
-TODO
+[db.collection.updateMany(filter, update, options)](https://docs.mongodb.com/manual/reference/method/db.collection.updateMany/) MongoDB operation
+
+Updates all matched documents in the specified collection. See [updateOne](#updateone).
 
 
 ### updateOneAndFind
 `fun updateOneAndFind(vararg filter: FilterPair, upsert: Boolean = false, update: UpdateOperation.() -> Unit): Entry?`
 
-TODO
+[db.collection.findOneAndUpdate(filter, update, options)](https://docs.mongodb.com/manual/reference/method/db.collection.findOneAndUpdate/) MongoDB operation
+
+Updates a single document and returns the found or inserted entry instead of the `UpdateOperation`. See [updateOne](#updateone).
+
+When `upsert` is not set and no document can be found for the query `null` is returned.
+
+If `upsert` is set and no document cn be found for the query a new document is createded in the MongoDB collection. The new document has all fields set that are either specified in the `fiter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for detais. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wrapps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katabase treats then this "partial" inserted document in subsequent calls.
 
 
 ### insertOne
