@@ -504,33 +504,16 @@ col.bulkWrite {
 
 ### Indexes
 `fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, customOptions: (IndexOptions.() -> Unit)? = null)`
-* TODO Creation (multiple microservices): `createIndexes()`
-* TODO all following types
-* TODO getIndex for hinting
 
-#### Simple index
+All specified indexes will be automatically created by Katerbase when `createNonExistentCollections` is set.
+Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying the `partialIndex`. All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility about your index creation.
 
-TODO
+Each index field must be one of the following:
+* ascending
+* descending
+* [textIndex](https://docs.mongodb.com/manual/text-search/#text-index)
 
-
-### Compound index
-
-TODO
-
-
-### Text index
-
-TODO
-
-
-### Partial index
-
-TODO
-
-
-### Index options
-
-TODO
+The [indexes MongoDB documentation](https://docs.mongodb.com/manual/indexes/) explains the index handling in more details.
 
 
 ### Type mapping
@@ -585,38 +568,6 @@ In case the MongoDB document does not have a property value that is defined in t
 A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "actorname"}, {birthday: ISODate(0)}]}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[Actor(name=actorname, birthday=null), Actor(name=, birthday=Date(0))]`.
 
 
-#### Double and Float
-
-TODO
-
-
-#### String and Enum
-
-TODO
-
-
-#### List, Set and other Collections
-
-TODO
-
-
 #### Null and undefined
 
 All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined`, then the Kotlin model has an additional field, see [additional Kotlin field](#additional-kotlin-field). If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
-
-
-## Database configuration
-TODO
-* createMongoClientFromUri
-* logAllQueries
-* uri
-* allowReadFromSecondaries
-* supportChangeStreams
-* createNonExistentCollections
-* localMode (better naming, local does not mean development)
-* immutable mongoCollections
-* capped collections
-
-TODO implement
-* logging
-* db.internalCollection<MyEntry>() access instead of db.mongoCollections[MyEntry::class]!! ?
