@@ -102,7 +102,7 @@ The following operators can be executed on a collection, for example `database.g
 [db.collection.find(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.find/) MongoDB operation
 
 Example usage:
-```
+```kotlin
 col.find()
 col.find(Book::_id equal "the_hobbit")
 col.find(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
@@ -127,7 +127,7 @@ The returned `FindCursor` is an `Iterable`. Before iterating though the objects 
 The order of the `FindCursor` operators do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should be iterated only once, as each iteration creates network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in case you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
 
 Example usage:
-```
+```kotlin
 val books: Iterable<Book> = col.find(Book::author equal "Tokien")
     .selectedFields(Book::author, Book::yearPublished)
     .sortByDescending(Book::yearPublished)
@@ -571,3 +571,7 @@ A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "a
 #### Null and undefined
 
 All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined`, then the Kotlin model has an additional field, see [additional Kotlin field](#additional-kotlin-field). If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
+
+
+## Project state
+Katerbase evolved from a few extensions functions that were created in December 2016 to a bunch of internally used MongoDB utility functions. The utility functions are currently used at [Moshbit](https://moshbit.com) in several projects. In 2019, we decided to create a standalone library out of the proofed java-mongo-driver wrapper functions. The library design was adapted several times to provide the goal of Katerbase: Writing concise and simple MongoDB queries without any boilerplate or ceremony. Many thanks to [@functionaldude](https://github.com/functionaldude) for all the long design discussions that lead into the current state of the project.
