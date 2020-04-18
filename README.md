@@ -111,21 +111,21 @@ col.find(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
 
 The order of the `vararg filter: FilterPair` argument does not matter in all Katerbase `filter` arguments. So `col.find(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)` is the same as `col.find(Book::yearPublished lowerEquals 1940, Book::author equal "Tolkien")`.
 
-[List of all supported filter modifiers](#filter-modifiers).
+[List of all supported filter operators](#filter-operators).
 
 The returned `FindCursor` is an `Iterable`. Before iterating though the objects further operations can be applied to the `FindCursor`:
 
 * `limit(limit: Int)` - [cursor.limit](https://docs.mongodb.com/manual/reference/method/cursor.limit/)
 * `skip(skip: Int)` - [cursor.skip](https://docs.mongodb.com/manual/reference/method/cursor.skip/)
 * `hint(index: MongoCollection.MongoIndex)` - [cursor.hint](https://docs.mongodb.com/manual/reference/method/cursor.hint/)
-* `selectedFields(vararg fields: MongoEntryField)` - [projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/)
-* `excludedFields(vararg fields: MongoEntryField)` - [projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/): Excluding fields is an anti-pattern and is not maintainable. Always try to use `selectedFields`
-* `projection(bson: Bson)` - [projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/): Direct `Bson` access, use only if selectedFields or excludedFields are insufficient
+* `selectedFields(vararg fields: MongoEntryField)` - [find projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/)
+* `excludedFields(vararg fields: MongoEntryField)` - [find projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/): Excluding fields is an anti-pattern and is not maintainable. Always try to use `selectedFields`.
+* `projection(bson: Bson)` - [find projection parameter](https://docs.mongodb.com/manual/reference/method/db.collection.find/): Direct `Bson` access, use only if `selectedFields` and `excludedFields` are insufficient.
 * `sortBy(field: MongoEntryField)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/)
 * `sortByDescending(field: MongoEntryField)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/)
-* `sort(bson: Bson)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/): direct `Bson` access, use only if sortBy or sortByDescending are insufficient
+* `sort(bson: Bson)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/): Direct `Bson` access, use only if `sortBy` and `sortByDescending` are insufficient.
 
-The order of the `FindCursor` operators do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should be iterated only once, as each iteration creates network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in case you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
+The order of the `FindCursor` operations do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should only be iterated once, as each iteration creates network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
 
 Example usage:
 ```kotlin
@@ -169,14 +169,14 @@ Counts how many matching documents in a collection are. If the filter is empty, 
 
 [db.collection.distinct()](https://docs.mongodb.com/manual/reference/method/db.collection.distinct/) MongoDB operation
 
-Returns an `Iterable` of the specified field with no duplicates. `col.distinct(Book::author)` returns an `Iterable<String>` with unique Strings. When applying filtering you can get e.g. by `col.distinct(Book::author, Book::yearPublished lower 2000)` all author names that have published at least one book before year 2000.
+Returns an `Iterable` of the specified field with no duplicates. E.g. `col.distinct(Book::author)` returns an `Iterable<String>` with unique Strings. When applying filtering you get e.g. by calling `col.distinct(Book::author, Book::yearPublished lower 2000)` all author names that have published at least one book before year 2000.
 
-As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration creates network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` in case you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
+As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration creates network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` if you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
 
-In case `T` can not be reified, pass the `entryClass` to the overloaded function
+In case `T` can't be reified, pass the `entryClass` to the overloaded function
 `fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
 
-Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) that happens when using Kotlin-NewInference starting at Kotlin 1.3.60, this function might not be callable, therefore you can use meanwhile the function `fun <reified T : Any> distinct_mitigateCompilerBug(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>` as workaround. Kotlin 1.4 should fix this compiler bug.
+Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) that happens when using Kotlin-NewInference starting at Kotlin 1.3.60, this function might not be callable. Therefore, you can use meanwhile the function `fun <reified T : Any> distinct_mitigateCompilerBug(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>` as workaround. Kotlin 1.4 should fix this compiler bug.
 
 
 ## Write operations
@@ -391,7 +391,7 @@ Removes a collection from the database. When Katerbase is initialized with `crea
 
 [db.collection.clear()](https://docs.mongodb.com/manual/reference/method/db.collection.deleteMany/) MongoDB operation
 
-Calls [deleteMany](#deleteMany) with no arguments, so all documents in the collection will be deleted.
+Calls [deleteMany](#deletemany) with no arguments, so all documents in the collection will be deleted.
 
 
 ## Other operators
@@ -401,7 +401,7 @@ Calls [deleteMany](#deleteMany) with no arguments, so all documents in the colle
 
 [db.collection.aggregate](https://docs.mongodb.com/manual/reference/method/db.collection.aggregate/) MongoDB operation
 
-In case `T` can not be reified, pass the `entryClass` to the overloaded function `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T>`.
+In case `T` can't be reified, pass the `entryClass` to the overloaded function `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T>`.
 
 `aggregate` is currently in an experimental state.
 
@@ -575,4 +575,4 @@ All Kotlin field values can be nullable, in that case `null` will be stored in t
 
 
 ## Project state
-Katerbase evolved from a few extensions functions that were created in December 2016 to a bunch of internally used MongoDB utility functions. The utility functions are currently used at [Moshbit](https://moshbit.com) in several projects. In 2019, we decided to create a standalone library out of the proofed java-mongo-driver wrapper functions. The library design was adapted several times to provide the goal of Katerbase: Writing concise and simple MongoDB queries without any boilerplate or ceremony. Many thanks to [@functionaldude](https://github.com/functionaldude) for all the long design discussions that lead into the current state of the project.
+Katerbase evolved from a few extensions functions that were created in December 2016 to a bunch of internally used MongoDB utility functions. The utility functions are currently used at [Moshbit](https://moshbit.com) in several projects. In 2019, we decided to create a standalone library out of the proofed mongo-java-driver wrapper functions. The library design was adapted several times to provide the goal of Katerbase: Writing concise and simple MongoDB queries without any boilerplate or ceremony. Many thanks to [@functionaldude](https://github.com/functionaldude) for all the long design discussions that lead into the current state of the project.
