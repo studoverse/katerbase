@@ -299,10 +299,10 @@ Three different `insertOne` calls can be used, depending on the required usecase
 
 
 #### upsert on duplicate _id
-When calling `insertOne(document = Book().apply { _id = "the_hobbit"; authorName = "X" }, upsert = true)` and a document with the _id "the_hobbit" already exists, the given document will get replaced. Katerbase uses in that case the [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation with the `upsert: true` parameter. In this example the document will have after the transaction `authorName: "X"`, no matter if the
+When calling `insertOne(document = Book().apply { _id = "the_hobbit"; authorName = "X" }, upsert = true)` and a document with the _id "the_hobbit" already exists, the given document will get replaced. Katerbase uses in that case the [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation with `upsert: true` parameter. In this example the resulting document will have `authorName: "X"` set, no matter if the
 document previously exited in the MongoDB collection or not.
 
-This is useful if you expect that duplicates might happen, but the newer data should always be used then. 
+This is useful if you expect that duplicates might happen, but the newer data should always be used. 
 
 Alternatively, use [updateOneOrInsert](#updateoneorinsert) if you want to atomically either insert or update the document with fine-grained control.
 
@@ -310,15 +310,15 @@ Alternatively, use [updateOneOrInsert](#updateoneorinsert) if you want to atomic
 #### throw on duplicate _id
 When calling `insertOne(document = Book().apply { _id = "the_hobbit" }, upsert = false)` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead, a `DuplicateKeyException` will be thrown.
 
-This is useful when you do not expect that duplicates will happen. [Failing fast can reduce debugging’s cost, and pain, significantly](https://www.martinfowler.com/ieeeSoftware/failFast.pdf).
+This is useful when you do not expect that duplicates will happen. [Failing fast can reduce debugging’s cost and pain significantly](https://www.martinfowler.com/ieeeSoftware/failFast.pdf).
 
 
 #### handle duplicate _id in Kotlin
-When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplicateKey: { ... })` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead, the `onDuplicateKey` lambda gets executed.
+When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplicateKey: { ... })` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead, the `onDuplicateKey` lambda gets called.
 
-This is useful if you expect that duplicates might happen, and you can resolve that duplicates on your own by writing Kotlin code and e.g. use an [updateOne](#updateone) operator in the `onDuplicateKey` lambda.
+This is useful if you expect that duplicates might happen, and you can resolve that duplicates on your own by writing Kotlin code and e.g. use an [updateOne](#updateone) operation in the `onDuplicateKey` lambda.
 
-Note that the `onDuplicateKey` lambda is not atomically executed but called after the `insertOne` call at the MongoDB. If you can archive an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert).
+Note that the `onDuplicateKey` lambda is not atomically executed but called after MongoDB finishes the `insertOne` call. If you can archive an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert) instead.
 
 
 ### findOneOrInsert
@@ -326,9 +326,9 @@ Note that the `onDuplicateKey` lambda is not atomically executed but called afte
 
 [db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) and [db.collection.findOneAndUpdate(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOneAndUpdate/) MongoDB operation
 
-Find the document or in case the filtered document does not exist insert a new document. The document is returned matter if it exists previously or it was just inserted. This works atomically, so `newEntry` may be called even if the document exists during the `findOneOrInsert` operation. In that case the document won't get created but the already existent document will be returned.
+Find the document or in case the filtered document does not exist insert a new document. The document is returned no matter if it exists previously or it was just inserted. `newEntry` might get called even if the document exists during the `findOneOrInsert` operation. In that case the document won't get created but the already existent document will be returned.
 
-`findOneOrInsert()` uses internally at first `find()` to look up a document. In case the document is not found, it will execute the `findOneAndUpdate` MongoDB operation. This is a performance optimization, when using `findOneAndUpdate` the MongoDB document is locked, but when using `find()` the document won't get locked. So in case the document can be found, MongoDB won't use any locks. In case the document won't get found via `find()`, `findOneOrInsert` will use internally the `updateOneAndFind` MongoDB operation with `upsert = true` parameter to insert the document or just return the existent document.
+`findOneOrInsert()` uses internally at first `find` to look up a document. In case the document is not found, it will execute the `findOneAndUpdate` MongoDB operation. This is a performance optimization, when using `findOneAndUpdate` the MongoDB document is locked, but when using `find` the document won't get locked by MongoDB. So in case the document can be found, MongoDB won't use any locks. In case the document won't get found via `find`, `findOneOrInsert()` will use internally the `updateOneAndFind` MongoDB operation with `upsert = true` parameter to insert the document or just return the existent document.
 
 #### Example usage with _id filter:
 ```kotlin
@@ -340,7 +340,7 @@ val book = collection.findOneOrInsert(Book::_id equal "the_hobbit") {
   }
 }
 ```
-`book._id` is always "the_hobbit", no matter if the document was inserted or already existed.
+In this example, `book._id` is always "the_hobbit", no matter if the document was inserted or already existed.
 `book.name` is "The inserted Hobbit" in case the document was just inserted, or whatever it was before in case it already existed.
 
 #### Example usage without _id filter:
@@ -352,7 +352,7 @@ val book = collection.findOneOrInsert(Book::name equal "The Hobbit", Book::autho
   }
 }
 ```
-`book._name` is always "The Hobbit" and `book.author` is always "Tokien", no matter if the document was inserted or already existed.
+In this example, `book._name` is always "The Hobbit" and `book.author` is always "Tokien", no matter if the document was inserted or already existed.
 `book._id` is "the_new_inserted_hobbit" in case the document was just inserted, or whatever it was before in case it already existed.
 
 
@@ -413,17 +413,10 @@ Use `aggregationPipeline` to start a new aggregation. The following operators ar
 * match
 * group
 * project
-* transform
-** include
-** project
+* transform: include, project
 * sortBy
 * sortByDescending
-* accumulators
-** sum
-** average
-** max
-** min
-** count
+* accumulators: sum, average, max, min, count
 
 `aggregate` is currently in an experimental state.
 
@@ -481,6 +474,8 @@ The following bulkWrite operations can be used in the `action` lambda:
 * deleteOne: `fun deleteOne(vararg filter: FilterPair): Boolean`
 * deleteMany: `fun deleteMany(vararg filter: FilterPair): Unit`
 
+See the corresponding [write operations](#write-operations) for more details on `filter` and `update` arguments.
+
 Example:
 ```kotlin
 col.bulkWrite {
@@ -505,7 +500,7 @@ col.bulkWrite {
 `fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null)`
 
 All specified indexes will be automatically created by Katerbase when `createNonExistentCollections` is set.
-Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying the `partialIndex`. All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility about your index creation.
+Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying a `partialIndex`. All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility about your index creation.
 
 Each index field must be one of the following:
 * ascending
@@ -550,26 +545,26 @@ Deprecated BSON types are not supported by Katerbase and are here omitted.
 
 #### Kotlin fields
 
-By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jvm/-transient/) field annotation, a field can be marked no not being serialized, therefore it won't get stored in the MongoDB document. [Getters and setters](https://kotlinlang.org/docs/reference/properties.html#getters-and-setters) won't get serialized or deserialized by Katerbase. Also, functions within the Kotlin model class will be ignored by the serialization and deserialization. All kind of field visibility modifiers are acceptable, so it does not matter if a field of a Kotlin model is `public`, `internal`, `protected` or `private`.
+By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jvm/-transient/) field annotation, a field can be marked as to be ignored on serialization, therefore it won't get stored in the MongoDB document. [Getters and setters](https://kotlinlang.org/docs/reference/properties.html#getters-and-setters) won't get serialized or deserialized by Katerbase. Also, functions within the Kotlin model class will be ignored by the serialization and deserialization. All kind of field visibility modifiers are acceptable, so it does not matter if a field of a Kotlin model is `public`, `internal`, `protected` or `private`.
 
 
 #### Missing Kotlin field
 
 MongoDB collections can be [schemaless](https://www.mongodb.com/blog/post/why-schemaless), although [document schemas](https://docs.mongodb.com/stitch/mongodb/document-schemas/) can be enforced. In case the MonoDB document has properties that do not have a corresponding Kotlin field, the **property will be ignored** on deserialization. This is useful when adding fields in the MongoDB document if the updated Kotlin models are not yet deployed.
 
-A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [], website: "https://example.org"}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[]`.
+A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [], website: "https://example.org"}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[])`.
 
 
 #### Additional Kotlin field
 
 In case the MongoDB document does not have a property value that is defined in the Kotlin model, respectively the MongoDB property is `undefined`, the **default field value** will be used. This is useful when adding fields to Kotlin models if the MongoDB documents are not yet migrated.
 
-A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "actorname"}, {birthday: ISODate(0)}]}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[Actor(name=actorname, birthday=null), Actor(name=, birthday=Date(0))]`.
+A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "actorname"}, {birthday: ISODate(0)}]}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[Actor(name=actorname, birthday=null), Actor(name=, birthday=Date(0))])`.
 
 
 #### Null and undefined
 
-All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined`, then the Kotlin model has an additional field, see [additional Kotlin field](#additional-kotlin-field). If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
+All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined` the behavior described in [additional Kotlin field](#additional-kotlin-field) applies. If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0`/`0.0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
 
 
 ## Project state
