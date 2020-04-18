@@ -9,7 +9,7 @@ Katerbase has object mapping built in, so queried data from MongoDB get deserial
 
 ## Quick start
 
-The following example showcases how MongoDB documents can be queried, inserted and modified from Kotlin.
+The following example showcases how MongoDB documents can be queried, inserted and modified from Kotlin:
 
 ```kotlin
 class Book : MongoMainEntry() {
@@ -39,11 +39,11 @@ col.updateOne(Book::_id equal "the_hobbit") {
 val book: Book? = col.findOne(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
 ```
 
-Check out the Katerbase [read operations](#read-operations) and [write operation](#write-operations) sections for all supported MongoDB operations and examples. 
+Check out the Katerbase [read operations](#read-operations) and [write operations](#write-operations) sections for all supported MongoDB operations and examples. 
 
 ### Database Setup
 
-Katerbase supports multiple MongoDB databases. Each database is defined in code. By creating a MongoDatabase object, the connection URI must be specified along with the collection definitions:
+A MongoDB database with all its collections is defined in code. When creating a Katerbase MongoDatabase object, the connection URI must be specified along with the collection definitions:
 ```kotlin
 var database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
   override fun getCollections(): Map<out KClass<out MongoMainEntry>, String> = mapOf(
@@ -57,7 +57,7 @@ var database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase"
       createIndex(Movie::name.toMongoField().textIndex())
     }
     with(getCollection<User>()) {
-      createIndex(User::email.toMongoField().ascending(), customOptions = { unique(true) })
+      createIndex(User::email.toMongoField().ascending(), indexOptions = { unique(true) })
       createIndex(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
     }
   }
@@ -70,11 +70,11 @@ var database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase"
 
 ### Collection Setup
 
-Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin model class to the `override fun getCollections()`.
+Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin model class to  `override fun getCollections()` If `createNonExistentCollections` is set, Katerbase will automatically create the defined collection.
  
 ```kotlin
 class Movie : MongoMainEntry() {
-  class Actor : MongoSubEntry() {
+  class Actor : MongoSubEntry(f) {
     var name = ""
     var birthday: Date? = null
   }
@@ -84,17 +84,18 @@ class Movie : MongoMainEntry() {
 }
 ```
 
-The Kotlin model class must inherit from `MongoMainEntry`, therefore `Movie` also has a `var _id: String` field. Only `MongoMainEntry` objects can be inserted and queried from the MongoDB. MongoDB [embedded/nested documents](https://docs.mongodb.com/manual/tutorial/query-embedded-documents/) must inherit from `MongoSubEntry` to explicitly opt-in into the serialization and deserialization of this subdocument class.
+The Kotlin model class must inherit from `MongoMainEntry`, therefore `Movie` also has a `var _id: String` field. Only `MongoMainEntry` objects can be inserted and queried from the MongoDB. MongoDB [embedded/nested documents](https://docs.mongodb.com/manual/tutorial/query-embedded-documents/) must inherit from `MongoSubEntry` to explicitly opt-in into the serialization and deserialization of the subdocument class.
 
 
 ### Installation
 
-Currently, the library is not yet published to Maven Central, to use Katerbase download this Git repository and add the Kotlin files manually to your project. The library will be published to Maven Central at a later point.
+Currently, the library is not yet published to Maven Central. To use Katerbase, download this Git repository and add the Kotlin files manually to your project. The library will be published to Maven Central at a later point.
 
 
 ## Read operations
 
-The following operators can be executed on a collection, for example `database.getCollection<Movie>.find()`.
+The following operations can be executed on a collection, for example `database.getCollection<Movie>.find()`.
+
 
 ### find
 `fun find(vararg filter: FilterPair): FindCursor<Entry>`
@@ -503,7 +504,7 @@ col.bulkWrite {
 
 
 ### Indexes
-`fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, customOptions: (IndexOptions.() -> Unit)? = null)`
+`fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null)`
 
 All specified indexes will be automatically created by Katerbase when `createNonExistentCollections` is set.
 Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying the `partialIndex`. All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility about your index creation.

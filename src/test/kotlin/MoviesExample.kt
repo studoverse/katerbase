@@ -119,7 +119,7 @@ class MoviesExample {
             createIndex(Movie::name.toMongoField().textIndex())
           }
           with(getCollection<User>()) {
-            createIndex(User::email.toMongoField().ascending(), customOptions = { unique(true) })
+            createIndex(User::email.toMongoField().ascending(), indexOptions = { unique(true) })
             createIndex(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
           }
         }
