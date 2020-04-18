@@ -142,7 +142,7 @@ abstract class MongoDatabase(
     /**
      * This only works if MongoDB is a replica set
      * To test this set up a local replica set (follow the README in local-development > local-mongo-replica-set)
-     * Use [ignoredFields] to exclude a set of fields, if any change occures to these fields it will be ignored
+     * Use [ignoredFields] to exclude a set of fields, if any change occurs to these fields it will be ignored
      */
     fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), action: (PayloadChange<Entry>) -> Unit): Unit {
       thread {
@@ -465,10 +465,6 @@ abstract class MongoDatabase(
       }
     }
 
-    fun insertMany(documents: List<Entry>, upsert: Boolean) {
-      bulkWrite { insertMany(documents, upsert) }
-    }
-
     // TODO when updating to mongo-java-driver 4.0 return an InsertOneResult instead of Unit
     fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)) {
       try {
@@ -686,10 +682,6 @@ abstract class MongoDatabase(
         } else {
           models.add(InsertOneModel(document.toBSONDocument()))
         }
-      }
-
-      fun insertMany(documents: List<Entry>, upsert: Boolean) {
-        documents.forEach { insertOne(it, upsert) }
       }
 
       fun deleteOne(vararg filter: FilterPair): Boolean {

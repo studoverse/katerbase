@@ -190,6 +190,8 @@ The following update and delete operations all have a `vararg filter: FilterPair
 
 Updates a single document if matched by `filter` with the specified `update` lambda. The returned [UpdateResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/UpdateResult.html) holds information about the number of documents matched by the query and the number of documents modified by the update.
 
+If no document matched the given query, no new document is created. Use [insertOne with upsert=true](#upsert-on-duplicate-_id) if you want to overwrite an existing documentj. Use [updateOnOrInsert](#updateoneorinsert) if you want to insert a specific document or use execute the `update` lambda if the document already exists.
+
 If the `update` lambda did not call any [update operators](#update-operators), the query won't get executed on the database and will instantly return for performance reasons.
 
 #### Example with fixed operators
@@ -216,9 +218,9 @@ col.updateOne(CronJob::_id equal cronJobId, CronJob::state equal CronJob.State.R
 }
 ```
 
-Depending on `successfullyFinished` one of the two if branches will get evaluated when calling the `update` lambda. However, `CronJob::state` will always be set.
+`CronJob::state` will always be set. Depending on `successfullyFinished`, one of the two if branches will get evaluated when calling the `update` lambda.
 
-The `update` argument is not in contrast to the `filter` argument a list of operations but a true lambda. The `update` lambda puts all [update operators](#update-operators) into a private `MutableMap<String, MutableList<MongoPair>>` inside the currently prepared `UpdateOperation` class. Therefore all update operators like `setTo` or `incrementBy` that are called at runtime will be added to that `MutableMap`. Other update operators that are in this lambda but are not executed will therefore be not seen by the `UpdateOperation`. This API pattern is also known by the official Kotlin [kotlinx.html](https://github.com/Kotlin/kotlinx.html) library and allows an idiomatic Kotlin experience while preparing the update operation. Therefore all Kotlin language features like branches, functions and loops are avilable in the `update` lambda.
+The `update` argument is not in contrast to the `filter` argument a list of operations but a true lambda. The `update` lambda puts all [update operators](#update-operators) into a private `MutableMap<String, MutableList<MongoPair>>` inside the currently prepared `UpdateOperation` class. Therefore all update operators like `setTo` or `incrementBy` that are called at runtime will be added to that `MutableMap`. Other update operators that are in this lambda but are not executed will therefore be not seen by the `UpdateOperation`. This API pattern is also known by the Kotlin [kotlinx.html](https://github.com/Kotlin/kotlinx.html) library and allows an idiomatic Kotlin experience while preparing the update operation. Therefore all Kotlin language features like branches, functions and loops are avilable in the `update` lambda.
 
 
 ### updateMany
@@ -240,7 +242,31 @@ Updates a single document and returns the found or inserted entry instead of the
 
 When `upsert` is not set and no document can be found for the query `null` is returned.
 
-If `upsert` is set and no document cn be found for the query a new document is createded in the MongoDB collection. The new document has all fields set that are either specified in the `fiter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for detais. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wrapps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katabase treats then this "partial" inserted document in subsequent calls.
+If `upsert` is set and no document can be found for the query a new document is created in the MongoDB collection. The new document has all fields set that are either specified in the `fiter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for details. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wraps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katabase treats then this "partial" inserted document in subsequent calls.
+
+If a new document gets created, the `setOnInsert` operator might help.
+
+
+### updateOneOrInsert
+`fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
+
+`updateOneOrInsert` is extension to [updateOne](#updateone):
+* If a matching document exists, the `update` operation will get applied to that document, see [updateOne](#updateone).
+* If no matching document exists, a new document is inserted. The new document has all fields set that are either specified in the `filter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for details. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wraps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katabase treats then this "partial" inserted document in subsequent calls.
+
+If a new document gets created, the `setOnInsert` operator might help.
+
+Alternatively, use [insertOne with upsert=true](#upsert-on-duplicate-_id) if you have a Kotlin model object and want to overwrite an existing document.
+
+
+Example:
+```kotlin
+col.updateOneOrInsert(User::_id equal "user_id") {
+  User::lastSignIn setTo Date()
+  User::signUp setOnInsert Date()
+}
+```
+If the user with the given `_id` already exists, only `lastSignIn` will be updated in the corresponding document. But if the user did not exist, a new user will created, the final document is then `{_id: "user_id", lastSignIn: date, signUp: date}`.
 
 
 ### insertOne
@@ -251,7 +277,27 @@ If `upsert` is set and no document cn be found for the query a new document is c
 
 Inserts the provided document. See section [type mapping](#type-mapping) for Kotlin serialization details. 
 
-Three different `insertOne` calls can be used, depending on the requried usecase:
+If you want to insert multiple documents within one transaction, use `bulkWrite { documents.foreEach { insertOne(it) } }`, see [bulk operations](#bulk-operations).
+
+Examples:
+```kotlin
+val newUserEmail = "john.doe@example.com"
+
+col.insertOne(User().apply {
+  _id = generateId(newUserEmail)
+  email = newUserEmail
+}, upsert = false)
+
+col.insertOne(User().apply {
+  _id = generateId(newUserEmail)
+  email = newUserEmail
+}, onDuplicateKey = {
+  ErrorLoggingFramework.reportException("Tried to insert $newUserEmail, but the user already exists.")
+})
+```
+
+Three different `insertOne` calls can be used, depending on the required usecase:
+
 
 #### upsert on duplicate _id
 When calling `insertOne(document = Book().apply { _id = "the_hobbit"; authorName = "X" }, upsert = true)` and a document with the _id "the_hobbit" already exists, the given document will get replaced. Katerbase uses in that case the [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation with the `upsert: true` parameter. In this example the document will have after the transaction `authorName: "X"`, no matter if the
@@ -259,34 +305,25 @@ document previously exited in the MongoDB collection or not.
 
 This is useful if you expect that duplicates might happen, but the newer data should always be used then. 
 
+Alternatively, use [updateOneOrInsert](#updateoneorinsert) if you want to atomically either insert or update the document with fine-grained control.
+
+
 #### throw on duplicate _id
-When calling `insertOne(document = Book().apply { _id = "the_hobbit" }, upsert = false)` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead a `DuplicateKeyException` will be thrown.
+When calling `insertOne(document = Book().apply { _id = "the_hobbit" }, upsert = false)` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead, a `DuplicateKeyException` will be thrown.
 
 This is useful when you do not expect that duplicates will happen. [Failing fast can reduce debugging’s cost, and pain, significantly](https://www.martinfowler.com/ieeeSoftware/failFast.pdf).
 
 
 #### handle duplicate _id in Kotlin
-When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplicateKey: { ... })` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead the `onDuplicateKey` lamda gets executed.
+When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplicateKey: { ... })` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead, the `onDuplicateKey` lambda gets executed.
 
 This is useful if you expect that duplicates might happen, and you can resolve that duplicates on your own by writing Kotlin code and e.g. use an [updateOne](#updateone) operator in the `onDuplicateKey` lambda.
 
-Note that the `onDuplicateKey` lambda is not atomically executed but called after the `insertOne` call at the MongoDB. If you can archive an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert). 
-
-
-### insertMany
-`fun insertMany(documents: List<Entry>, upsert: Boolean)`
-
-TODO remove?
-
-
-### updateOneOrInsert
-`fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
-
-TODO remove?
+Note that the `onDuplicateKey` lambda is not atomically executed but called after the `insertOne` call at the MongoDB. If you can archive an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert).
 
 
 ### findOneOrInsert
-`fun findOneOrInsert(vararg filter: FilterPair, setWithId: Boolean = false, newEntry: () -> Entry): Entry`
+`fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry`
 
 [db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) and [db.collection.findOneAndUpdate(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOneAndUpdate/) MongoDB operation
 
@@ -298,7 +335,7 @@ Find the document or in case the filtered document does not exist insert a new d
 ```kotlin
 val book = collection.findOneOrInsert(Book::_id equal "the_hobbit") {
   Book().apply {
-    // // On inserting a new document, _id will be used from the filter query, so "the_hobbit" in this case
+    // On inserting a new document, _id will be used from the filter query, so "the_hobbit" in this case
     name = "The inserted Hobbit"
     author = "Tolkien"
   }
@@ -362,12 +399,15 @@ Calls [deleteMany](#deleteMany) with no arguments, so all documents in the colle
 `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClazz: KClass<T>): AggregateCursor<T>` and
 `fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T>`
 
-TODO
+`aggregate` is currently in an experimental state.
 
 
 ### watch
+`fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), action: (PayloadChange<Entry>) -> Unit)`
 
-TODO
+Watch only works if MongoDB is a replica set. Use `ignoredFields` to exclude a set of fields, if any change occurs to these fields it will be ignored.
+
+`aggregate` is currently in an experimental state.
 
 
 ## Filter operators
@@ -377,8 +417,9 @@ TODO
 
 
 ## Update operators
-* TODO setTo, child, childWithCurosor, unset, seetOnInsert, incrementBy, push (2x), pull, pullWhere...
+* TODO setTo, child, childWithCursor, unset, setOnInsert, incrementBy, push (2x), pull, pullWhere...
 * TODO lambda -> if statements within update operation
+
 
 ## Bulk operations
 
@@ -406,7 +447,6 @@ TODO
 ### Text index
 
 TODO
-
 
 
 ### Partial index
