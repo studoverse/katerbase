@@ -689,7 +689,9 @@ abstract class MongoDatabase(
         return models.add(DeleteOneModel(filter.toFilterDocument()))
       }
 
-      fun deleteMany(vararg filter: FilterPair) = models.add(DeleteManyModel(filter.toFilterDocument()))
+      fun deleteMany(vararg filter: FilterPair): Unit {
+        models.add(DeleteManyModel(filter.toFilterDocument()))
+      }
     }
 
     fun Array<out FilterPair>.getExecutionPipeline(): String {

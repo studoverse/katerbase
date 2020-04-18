@@ -190,7 +190,7 @@ The following update and delete operations all have a `vararg filter: FilterPair
 
 Updates a single document if matched by `filter` with the specified `update` lambda. The returned [UpdateResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/UpdateResult.html) holds information about the number of documents matched by the query and the number of documents modified by the update.
 
-If no document matched the given query, no new document is created. Use [insertOne with upsert=true](#upsert-on-duplicate-_id) if you want to overwrite an existing documentj. Use [updateOnOrInsert](#updateoneorinsert) if you want to insert a specific document or use execute the `update` lambda if the document already exists.
+If no document matched the given query, no new document is created. Use [insertOne with upsert=true](#upsert-on-duplicate-_id) if you want to overwrite an existing document. Use [updateOnOrInsert](#updateoneorinsert) if you want to insert a specific document or use execute the `update` lambda if the document already exists.
 
 If the `update` lambda did not call any [update operators](#update-operators), the query won't get executed on the database and will instantly return for performance reasons.
 
@@ -292,7 +292,7 @@ col.insertOne(User().apply {
   _id = generateId(newUserEmail)
   email = newUserEmail
 }, onDuplicateKey = {
-  ErrorLoggingFramework.reportException("Tried to insert $newUserEmail, but the user already exists.")
+  return@loginFunction LoginResult.UserAlreadyExists
 })
 ```
 
@@ -398,6 +398,8 @@ Calls [deleteMany](#deleteMany) with no arguments, so all documents in the colle
 ### aggregate
 `fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T>`
 
+[db.collection.aggregate](https://docs.mongodb.com/manual/reference/method/db.collection.aggregate/) MongoDB operation
+
 In case `T` can not be reified, pass the `entryClass` to the overloaded function `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T>`.
 
 `aggregate` is currently in an experimental state.
@@ -408,25 +410,96 @@ In case `T` can not be reified, pass the `entryClass` to the overloaded function
 
 Watch only works if MongoDB is a replica set. Use `ignoredFields` to exclude a set of fields, if any change occurs to these fields it will be ignored.
 
+Use `aggregationPipeline` to start a new aggregation. The following operators are currently supported:
+* match
+* group
+* project
+* transform
+** include
+** project
+* sortBy
+* sortByDescending
+* accumulators
+** sum
+** average
+** max
+** min
+** count
+
 `aggregate` is currently in an experimental state.
 
 
 ## Filter operators
-* TODO equal, notEqual, lower, any, or...
-* TODO child, childWithCursor
-* TODO FindCursor: selectedFields, limit...
+* equal
+* notEqual
+* contains
+* containsCaseInsensitive
+* startsWith
+* startsWithCaseInsensitive
+* endsWith
+* has
+* inArray
+* hasAnyInArray
+* lower
+* lowerEquals
+* greater
+* greaterEquals
+* inRange
+* exists
+* valueDocument
+* or
+* and
+* textSearch
+* any
+* none
+* child
 
 
 ## Update operators
-* TODO setTo, child, childWithCursor, unset, setOnInsert, incrementBy, push (2x), pull, pullWhere...
-* TODO lambda -> if statements within update operation
+* setTo
+* unset
+* setToOnInsert
+* incrementBy
+* multiplyBy
+* push
+* pull
+* pullWHere
+* child
+* childWithCursor
 
 
 ## Bulk operations
+`fun bulkWrite(options: BulkWriteOptions = BulkWriteOptions(), action: BulkOperation.() -> Unit): BulkWriteResult`
 
-TOOD
+[db.collection.bulkWrite](https://docs.mongodb.com/manual/reference/method/db.collection.bulkWrite/) MongoDB operation
 
 If the `actions` lambda did not call any bulk operations, the query won't get executed on the database and will instantly return for performance reasons.
+
+The following bulkWrite operations can be used in the `action` lambda:
+* updateOne: `updateOne(vararg filter: FilterPair, update: UpdateOperation.() -> Unit)`
+* updateMany: `updateMany(vararg filter: FilterPair, update: UpdateOperation.() -> Unit)`
+* insertOne: `fun insertOne(document: Entry, upsert: Boolean)`
+* deleteOne: `fun deleteOne(vararg filter: FilterPair): Boolean`
+* deleteMany: `fun deleteMany(vararg filter: FilterPair): Unit`
+
+Example:
+```kotlin
+col.bulkWrite {
+  newBooks.forEach { newBook ->
+    insertOne(newBook, upsert = true)
+  }
+  deletedBooks.forEach { deletedBook ->
+    deleteOne(Book::_id equal deletedBook._id)
+  }
+}
+```
+
+In case the supported Katerbase functions are not sufficient, the `BulkOperations.models: MutableList<WriteModel<Document>>` field of the mongo-java-driver is exposed. You can add any [WriteModel](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/WriteModel.html) (DeleteManyModel, DeleteOneModel, InsertOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel):
+```kotlin
+col.bulkWrite {
+  models.add(UpdateManyModel<Book>(filter, update, options))
+}
+```
 
 
 ### Indexes
