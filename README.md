@@ -173,7 +173,7 @@ Returns an `Iterable` of the specified field with no duplicates. `col.distinct(B
 As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration creates network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` in case you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
 
 In case `T` can not be reified, pass the `entryClass` to the overloaded function
-`fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClazz: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
+`fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
 
 Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) that happens when using Kotlin-NewInference starting at Kotlin 1.3.60, this function might not be callable, therefore you can use meanwhile the function `fun <reified T : Any> distinct_mitigateCompilerBug(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>` as workaround. Kotlin 1.4 should fix this compiler bug.
 
@@ -242,7 +242,7 @@ Updates a single document and returns the found or inserted entry instead of the
 
 When `upsert` is not set and no document can be found for the query `null` is returned.
 
-If `upsert` is set and no document can be found for the query a new document is created in the MongoDB collection. The new document has all fields set that are either specified in the `fiter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for details. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wraps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katabase treats then this "partial" inserted document in subsequent calls.
+If `upsert` is set and no document can be found for the query a new document is created in the MongoDB collection. The new document has all fields set that are either specified in the `fiter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for details. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wraps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katerbase treats then this "partial" inserted document in subsequent calls.
 
 If a new document gets created, the `setOnInsert` operator might help.
 
@@ -252,7 +252,7 @@ If a new document gets created, the `setOnInsert` operator might help.
 
 `updateOneOrInsert` is extension to [updateOne](#updateone):
 * If a matching document exists, the `update` operation will get applied to that document, see [updateOne](#updateone).
-* If no matching document exists, a new document is inserted. The new document has all fields set that are either specified in the `filter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for details. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wraps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katabase treats then this "partial" inserted document in subsequent calls.
+* If no matching document exists, a new document is inserted. The new document has all fields set that are either specified in the `filter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for details. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` would have been used. This schemaless behavior is native to MongoDB and might confuse you first when coming from a traditional SQL background. Katerbase only wraps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katerbase treats then this "partial" inserted document in subsequent calls.
 
 If a new document gets created, the `setOnInsert` operator might help.
 
@@ -396,8 +396,9 @@ Calls [deleteMany](#deleteMany) with no arguments, so all documents in the colle
 ## Other operators
 
 ### aggregate
-`fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClazz: KClass<T>): AggregateCursor<T>` and
 `fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T>`
+
+In case `T` can not be reified, pass the `entryClass` to the overloaded function `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T>`.
 
 `aggregate` is currently in an experimental state.
 

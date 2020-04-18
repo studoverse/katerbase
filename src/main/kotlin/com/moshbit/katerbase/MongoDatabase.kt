@@ -134,7 +134,7 @@ abstract class MongoDatabase(
   // Mongo collection wrapper for Kotlin
   inner class MongoCollection<Entry : MongoMainEntry>(
     val collection: com.mongodb.client.MongoCollection<Document>,
-    private val entryClazz: KClass<Entry>
+    private val entryClass: KClass<Entry>
   ) {
 
     val name: String get() = collection.namespace.collectionName
@@ -160,7 +160,7 @@ abstract class MongoDatabase(
                 val ignoredMongoFields = ignoredFields.map { it.toMongoField() }.toSet()
 
                 // Get all the fields where we should listen for changes
-                val nonIgnoredMongoFields = entryClazz.memberProperties
+                val nonIgnoredMongoFields = entryClass.memberProperties
                   .mapNotNull { it as? MongoEntryField<*> }
                   .map { it.toMongoField() }
                   .filter { it !in ignoredMongoFields }
@@ -179,14 +179,14 @@ abstract class MongoDatabase(
           }
         }
         try {
-          changeStreamCollections.getValue(entryClazz).collection.watch(listOf(pipeline)).apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
+          changeStreamCollections.getValue(entryClass).collection.watch(listOf(pipeline)).apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
             .forEach { document ->
               val change = PayloadChange(
                 _id = (document.documentKey!!["_id"] as BsonString).value,
-                payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClazz) },
+                payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
                 operationType = document.operationType
               )
-              println("${entryClazz.simpleName} (id ${change._id}) ${change.operationType}: ${document.updateDescription}")
+              println("${entryClass.simpleName} (id ${change._id}) ${change.operationType}: ${document.updateDescription}")
               try {
                 action(change)
               } catch (e: Exception) { // If action fails, print the exception but don't close the ChangeStream
@@ -299,8 +299,8 @@ abstract class MongoDatabase(
       return collection.bulkWrite(models, options)
     }
 
-    private fun Document.toClass() = JsonHandler.fromBson(this, entryClazz)
-    private fun FindIterable<Document>.toClasses() = FindCursor(this, entryClazz, this@MongoCollection)
+    private fun Document.toClass() = JsonHandler.fromBson(this, entryClass)
+    private fun FindIterable<Document>.toClasses() = FindCursor(this, entryClass, this@MongoCollection)
 
     // Returns a MongoDocument as a list of mutators. Useful if you want to set all values in an update block.
     // In case _id should be included in the mutator, set withId to true.
@@ -315,20 +315,20 @@ abstract class MongoDatabase(
       return collection.find(filter.toFilterDocument())
     }
 
-    fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClazz: KClass<T>): AggregateCursor<T> {
+    fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T> {
       return AggregateCursor(
         mongoIterable = collection.aggregate(
           /*pipeline = */ pipeline.bson,
           /*resultClass = */ Document::class.java
         ),
-        clazz = entryClazz
+        clazz = entryClass
       )
     }
 
     inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T> {
       return aggregate(
         pipeline = aggregationPipeline(pipeline),
-        entryClazz = T::class
+        entryClass = T::class
       )
     }
 
@@ -364,14 +364,14 @@ abstract class MongoDatabase(
      * Use this if you need a set of distinct specific value of a document
      * More info: https://docs.mongodb.com/manual/reference/method/db.collection.distinct/
      */
-    fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClazz: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
+    fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
       return DistinctCursor(
         mongoIterable = collection.distinct(
           /*fieldName = */ distinctField.name,
           /*filter = */ filter.toFilterDocument(),
-          /*resultClass = */ entryClazz.java
+          /*resultClass = */ entryClass.java
         ),
-        clazz = entryClazz
+        clazz = entryClass
       )
     }
 
