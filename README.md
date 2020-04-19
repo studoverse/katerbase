@@ -4,7 +4,7 @@ Katerbase [keɪtərbeɪs] is a Kotlin wrapper for the [MongoDB Java Driver](http
 Its goal is to write concise and simple MongoDB queries without any boilerplate or ceremony. IDE autocompletion and type safety allow you to start writing MongoDB queries, even if you haven't used the MongoDB query syntax before.
 
 Katerbase has object mapping built in, so queried data from MongoDB get deserialized by 
-[Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin classes. Katerbase operations are designed to be extensible and thread-safe.
+[Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin classes.
 
 
 ## Quick start
