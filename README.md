@@ -4,7 +4,7 @@ Katerbase [keɪtərbeɪs] is a Kotlin wrapper for the [MongoDB Java Drivers](htt
 Its goal is to write concise and simple MongoDB queries without any boilerplate or ceremony. IDE autocompletion and type safety allow you to start writing MongoDB queries, even if you haven't used the MongoDB query syntax before.
 
 Katerbase has object mapping built in, so queried data from MongoDB get deserialized by 
-[Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin objects.
+[Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin objects. Katerbase operations are designed to be extensible and thread-safe.
 
 
 ## Quick start
@@ -540,7 +540,7 @@ Katerbase supports the following Kotlin types that are stored in a MongoDB docum
 
 Deprecated BSON types are not supported by Katerbase and are here omitted.
 
-[MongoDB field names](https://docs.mongodb.com/manual/core/document/#field-names) must be of type String, therefore nested Maps must be of the type `Map<String, *>`,. Collections can be `List<*>`, `Set<*>` or any other collection that is serializable and deserializable by Jackson. `*` must be a Kotlin type listed in the table above.
+[MongoDB field names](https://docs.mongodb.com/manual/core/document/#field-names) must be of type String, therefore nested Maps must be of the type `Map<String, *>`. Collections can be `List<*>`, `Set<*>` or any other collection that is serializable and deserializable by Jackson. `*` must be a Kotlin type listed in the table above.
 
 
 #### Kotlin fields
