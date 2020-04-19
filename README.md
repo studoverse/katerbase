@@ -1,10 +1,10 @@
 # Katerbase
 
-Katerbase [keɪtərbeɪs] is a Kotlin wrapper for the [MongoDB Java Drivers](http://mongodb.github.io/mongo-java-driver/) to provide idiomatic Kotlin support for MongoDB.
+Katerbase [keɪtərbeɪs] is a Kotlin wrapper for the [MongoDB Java Driver](http://mongodb.github.io/mongo-java-driver/) and offers idiomatic Kotlin support for MongoDB.
 Its goal is to write concise and simple MongoDB queries without any boilerplate or ceremony. IDE autocompletion and type safety allow you to start writing MongoDB queries, even if you haven't used the MongoDB query syntax before.
 
 Katerbase has object mapping built in, so queried data from MongoDB get deserialized by 
-[Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin objects. Katerbase operations are designed to be extensible and thread-safe.
+[Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin classes. Katerbase operations are designed to be extensible and thread-safe.
 
 
 ## Quick start
@@ -125,7 +125,7 @@ The returned `FindCursor` is an `Iterable`. Before iterating though the objects 
 * `sortByDescending(field: MongoEntryField)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/)
 * `sort(bson: Bson)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/): Direct `Bson` access, use only if `sortBy` and `sortByDescending` are insufficient.
 
-The order of the `FindCursor` operations do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should only be iterated once, as each iteration creates network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
+The order of the `FindCursor` operations do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should only be iterated once, as each iteration results in a network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
 
 Example usage:
 ```kotlin
@@ -142,7 +142,7 @@ val books: Iterable<Book> = col.find(Book::author equal "Tokien")
 
 [db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) MongoDB operation
 
-In contrast to `find()`, the `findOne()` operation in gets immediately executed on the database, and the retuned value is the actual Kotlin object.
+In contrast to `find()`, the `findOne()` operation gets immediately executed on the database, and the retuned value is the actual Kotlin object.
  
 `findOne(filter)` is implemented by `find(*filter).limit(1).firstOrNull()`. So all filter operators from [find](#find) apply here too, cursor operators can't be used. If you need to call `findOne` with additional cursor operators, just use `find` with `limit(1)` and `firstOrNull`.
 
@@ -152,16 +152,16 @@ In contrast to `find()`, the `findOne()` operation in gets immediately executed 
 
 [db.collection.find(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.find/) MongoDB operation
 
-`findDocuments()` returns a `FindIterable<Document>` in contrast to `find()` which returns a `FindCursor<Entry>`. So no type mapping is done, and instead of using the Katerbase find-operations like `limit()` the mongo-java-driver operaations of the FindIterable can be used. `Document` is in package `org.bson.Document` of the mongo-java-driver library and implements `Map<String, Object>, Serializable, Bson`. `FindIterable` is in package `com.mongodb.client` of the mongo-java-driver library and inherits from `MongoIterable<TResult>` which inherits from `Iterable<TResult>`.
+`findDocuments()` returns a `FindIterable<Document>` in contrast to `find()` which returns a `FindCursor<Entry>`. So no type mapping is done, and instead of using the Katerbase find-operations like `limit()` the mongo-java-driver operations of the FindIterable can be used. `Document` is in package `org.bson.Document` of the mongo-java-driver library and implements `Map<String, Object>, Serializable, Bson`. `FindIterable` is in package `com.mongodb.client` of the mongo-java-driver library and inherits from `MongoIterable<TResult>` which inherits from `Iterable<TResult>`.
 
-By using `findDocuments()` Katerbase offers direct access to the mongo-java-driver for all edge-cases that Katerbase doesn't supports. The MongoDB documentation for [FindIterable](https://mongodb.github.io/mongo-java-driver/3.12/driver/tutorials/perform-read-operations/#finditerable) explains all supported methods you can chain to the `findDocuments()`  operation.
+By using `findDocuments()` Katerbase offers direct access to the mongo-java-driver for all edge-cases that Katerbase doesn't support. The MongoDB documentation for [FindIterable](https://mongodb.github.io/mongo-java-driver/3.12/driver/tutorials/perform-read-operations/#finditerable) explains all supported methods you can chain to the `findDocuments()`  operation.
 
 ### count
 `fun count(vararg filter: FilterPair): Long`
 
 [db.collection.count(query, options)](https://docs.mongodb.com/manual/reference/method/db.collection.count/) MongoDB operation
 
-Counts how many matching documents in a collection are. If the filter is empty, [estimatedDocumentCount](https://docs.mongodb.com/manual/reference/method/db.collection.estimatedDocumentCount/) is used which  always results in *O(1)* runtime but the returned count might be out of date. If a filter is specified, [countDocuments](https://docs.mongodb.com/manual/reference/method/db.collection.countDocuments/) with runtime of up to *O(n)* (depending if an index is used or not) is used.
+Counts how many matching documents in a collection are. If the filter is empty, [estimatedDocumentCount](https://docs.mongodb.com/manual/reference/method/db.collection.estimatedDocumentCount/) is used which  always results in *O(1)* runtime, but the returned count might be out of date. If a filter is specified, [countDocuments](https://docs.mongodb.com/manual/reference/method/db.collection.countDocuments/) with runtime of up to *O(n)* (depending on whether an index is used or not) is used.
 
 
 ### distinct
@@ -171,7 +171,7 @@ Counts how many matching documents in a collection are. If the filter is empty, 
 
 Returns an `Iterable` of the specified field with no duplicates. E.g. `col.distinct(Book::author)` returns an `Iterable<String>` with unique Strings. When applying filtering you get e.g. by calling `col.distinct(Book::author, Book::yearPublished lower 2000)` all author names that have published at least one book before year 2000.
 
-As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration creates network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` if you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
+As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration results in a network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` if you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
 
 In case `T` can't be reified, pass the `entryClass` to the overloaded function
 `fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
@@ -181,7 +181,7 @@ Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) th
 
 ## Write operations
 
-The following update and delete operations all have a `vararg filter: FilterPair` argument, see [find(vararg filter: FilterPair)](#find). The insert operations deserialize with Jackson the Kotlin class into a MongoDB document. 
+The following update and delete operations all have a `vararg filter: FilterPair` argument, see [find(vararg filter: FilterPair)](#find). The insert operations deserialize the Kotlin class into a MongoDB document with Jackson. 
 
 
 ### updateOne
@@ -189,7 +189,7 @@ The following update and delete operations all have a `vararg filter: FilterPair
 
 [db.collection.updateOne(filter, update, options)](https://docs.mongodb.com/manual/reference/method/db.collection.updateOne/) MongoDB operation
 
-Updates a single document if matched by `filter` with the specified `update` lambda. The returned [UpdateResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/UpdateResult.html) holds information about the number of documents matched by the query and the number of documents modified by the update.
+Updates a single document if matched by `filter` with the specified `update` lambda. The returned [UpdateResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/UpdateResult.html) holds information about the number of documents matched by the query, and the number of documents modified by the update.
 
 If no document matches the given query, no new document is created. Use [insertOne with upsert=true](#upsert-on-duplicate-_id) if you want to overwrite an existing document. Use [updateOnOrInsert](#updateoneorinsert) if you want to insert a specific document and use that `update` lambda if the document already exists.
 
@@ -221,7 +221,7 @@ col.updateOne(CronJob::_id equal cronJobId, CronJob::state equal CronJob.State.R
 
 In this example `CronJob::state` will always be set. Depending on `successfullyFinished`, one of the two if branches will get evaluated when calling the `update` lambda.
 
-The `update` argument is in contrast to the `filter` argument not a list of operations but a true lambda. The `update` lambda puts all [update operators](#update-operators) into a private `MutableMap<String, MutableList<MongoPair>>` inside the currently prepared `UpdateOperation` object. Therefore, all update operators like `setTo` or `incrementBy` that are called at runtime will be added to that `MutableMap`. Other update operators that are in this lambda but are not executed will therefore be not seen by the `UpdateOperation`. This API pattern is also known by the Kotlin [kotlinx.html](https://github.com/Kotlin/kotlinx.html) library and allows an idiomatic Kotlin experience while preparing the update operation. Therefore, all Kotlin language features like branches, functions and loops are available in the `update` lambda.
+The `update` argument is in contrast to the `filter` argument not a list of operations but a true lambda. The `update` lambda puts all [update operators](#update-operators) into a private `MutableMap<String, MutableList<MongoPair>>` inside the currently prepared `UpdateOperation` object. Therefore, all update operators like `setTo` or `incrementBy` that are called at runtime will be added to that `MutableMap`. Other update operators that are in this lambda but are not executed will therefore be not seen by the `UpdateOperation`. This API pattern is also used by the Kotlin [kotlinx.html](https://github.com/Kotlin/kotlinx.html) library and allows an idiomatic Kotlin experience while preparing the update operation. Therefore, all Kotlin language features like branches, functions and loops are available in the `update` lambda.
 
 
 ### updateMany
@@ -256,7 +256,7 @@ If a new document gets created, the `setOnInsert` operator might help.
 
 If a new document gets created, the `setOnInsert` operator might help.
 
-Alternatively, use [insertOne with upsert=true](#upsert-on-duplicate-_id) if you have a Kotlin model object and want to overwrite an existing document.
+Alternatively, use [insertOne with upsert=true](#upsert-on-duplicate-_id) if you have a Kotlin model object, and you want to overwrite an existing document.
 
 Example:
 ```kotlin
@@ -295,7 +295,7 @@ col.insertOne(User().apply {
 })
 ```
 
-Three different `insertOne` calls can be used, depending on the required usecase:
+Three different `insertOne` calls can be used, depending on the required use case:
 
 
 #### upsert on duplicate _id
@@ -318,7 +318,7 @@ When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplica
 
 This is useful if you expect that duplicates might happen, and you can resolve that duplicates on your own by writing Kotlin code and e.g. use an [updateOne](#updateone) operation in the `onDuplicateKey` lambda.
 
-Note that the `onDuplicateKey` lambda is not atomically executed but called after MongoDB finishes the `insertOne` call. If you can archive an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert) instead.
+Note that the `onDuplicateKey` lambda is not atomically executed, but called after MongoDB finishes the `insertOne` call. If you can achieve an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert) instead.
 
 
 ### findOneOrInsert
@@ -326,9 +326,9 @@ Note that the `onDuplicateKey` lambda is not atomically executed but called afte
 
 [db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) and [db.collection.findOneAndUpdate(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOneAndUpdate/) MongoDB operation
 
-Find the document or in case the filtered document does not exist insert a new document. The document is returned no matter if it exists previously or it was just inserted. `newEntry` might get called even if the document exists during the `findOneOrInsert` operation. In that case the document won't get created but the already existent document will be returned.
+Find the document or in case the filtered document does not exist insert a new document. The document is returned no matter if it exists previously, or it was just inserted. `newEntry` might get called even if the document exists during the `findOneOrInsert` operation. In that case the document won't get created, but the already existent document will be returned.
 
-`findOneOrInsert()` uses internally at first `find` to look up a document. In case the document is not found, it will execute the `findOneAndUpdate` MongoDB operation. This is a performance optimization, when using `findOneAndUpdate` the MongoDB document is locked, but when using `find` the document won't get locked by MongoDB. So in case the document can be found, MongoDB won't use any locks. In case the document won't get found via `find`, `findOneOrInsert()` will use internally the `updateOneAndFind` MongoDB operation with `upsert = true` parameter to insert the document or just return the existent document.
+`findOneOrInsert()` uses internally at first `find` to look up a document. In case the document is not found, it will execute the `findOneAndUpdate` MongoDB operation. This is a performance optimization, when using `findOneAndUpdate` the MongoDB document is locked, but when using `find` the document won't get locked by MongoDB. So in case the document can be found, MongoDB won't use any locks. In case the document won't get found via `find`, `findOneOrInsert()` will use internally the `updateOneAndFind` MongoDB operation with `upsert = true` parameter to insert the document or just return the existing document.
 
 #### Example usage with _id filter:
 ```kotlin
@@ -361,7 +361,7 @@ In this example, `book._name` is always "The Hobbit" and `book.author` is always
 
 [db.collection.deleteOne()](https://docs.mongodb.com/manual/reference/method/db.collection.deleteOne/) MongoDB operation
 
-Deletes a single document from the collection. The filter must not by empty, otherwise an undefined document will be deleted.
+Deletes a single document from the collection. The filter must not be empty, otherwise an undefined document will be deleted.
 
 The returned [DeleteResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/DeleteResult.html) holds information about the number of documents deleted, which can be 0 in case no document matched the given query.
 
@@ -381,7 +381,7 @@ The returned [DeleteResult](https://mongodb.github.io/mongo-java-driver/3.12/jav
 
 [db.collection.drop()](https://docs.mongodb.com/manual/reference/method/db.collection.drop/) MongoDB operation
 
-Removes a collection from the database. When Katerbase is initialized with `createNonExistentCollections = true`, the collection will get automatically created next time the MongoDatabase is initialized with Katerbase.
+Removes a collection from the database. When Katerbase is initialized with `createNonExistentCollections = true`, the collection will be automatically created next time the MongoDatabase is initialized with Katerbase.
 
 
 ### clear
@@ -500,7 +500,7 @@ col.bulkWrite {
 `fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null)`
 
 All specified indexes will be automatically created by Katerbase when `createNonExistentCollections` is set.
-Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying a `partialIndex`. All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility about your index creation.
+Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying a `partialIndex`. All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility when creating the index.
 
 Each index field must be one of the following:
 * ascending
