@@ -452,6 +452,22 @@ class DatabaseTests {
     testDb.getCollection<NullableSimpleMongoPayload>().deleteOne(NullableSimpleMongoPayload::_id equal "testId")
   }
 
+  @Test
+  fun findOneOrInsertTest() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { clear() }
+
+    val payload = EnumMongoPayload().apply { long = 69 }
+    var returnVal = collection.findOneOrInsert(EnumMongoPayload::_id equal "findOneOrInsertTest", newEntry = { payload })
+    assertEquals(payload.long, returnVal.long)
+
+    collection.updateOne(EnumMongoPayload::_id equal "findOneOrInsertTest") {
+      EnumMongoPayload::long incrementBy 1
+    }
+
+    returnVal = collection.findOneOrInsert(EnumMongoPayload::_id equal "findOneOrInsertTest", newEntry = { payload })
+    assertEquals(payload.long + 1, returnVal.long)
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 

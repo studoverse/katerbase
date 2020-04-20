@@ -350,10 +350,10 @@ abstract class MongoDatabase(
       // This is a performance optimization, when using updateOneAndFind the document is locked
       return findOne(*filter) ?: updateOneAndFind(*filter, upsert = true) {
 
-        val setWithId = filter.any { it.key.name == "_id" }
-        val mutator = newEntry().asMutator(withId = setWithId)
-        if (!setWithId) {
-          require(mutator.any { it.key.name == "_id" && it.value != "" }) { "_id must either be in filter or must be set in newEntry()" }
+        val useNewEntryId = filter.none { it.key.name == "_id" }
+        val mutator = newEntry().asMutator(withId = useNewEntryId)
+        if (useNewEntryId && mutator.none { it.key.name == "_id" && it.value != "" }) {
+          throw IllegalArgumentException("_id must either be in filter or must be set in newEntry()")
         }
 
         mutator.forEach { updateMutator("setOnInsert", it) }
