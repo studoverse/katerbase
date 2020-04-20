@@ -6,7 +6,6 @@ import com.mongodb.bulk.BulkWriteResult
 import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoClient
 import com.mongodb.client.MongoClients
-import com.mongodb.client.MongoDatabase
 import com.mongodb.client.model.*
 import com.mongodb.client.model.changestream.FullDocument
 import com.mongodb.client.model.changestream.OperationType
@@ -40,10 +39,10 @@ abstract class MongoDatabase(
 ) {
   protected val isReplicaSet: Boolean
   protected val client: MongoClient
-  protected val database: MongoDatabase
-  val mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
-  private val changeStreamClient: MongoClient?
-  private val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected val internalDatabase: com.mongodb.client.MongoDatabase
+  protected val mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected val changeStreamClient: MongoClient?
+  protected val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
 
   abstract fun getCollections(): Map<out KClass<out MongoMainEntry>, String>
 
@@ -71,9 +70,9 @@ abstract class MongoDatabase(
     client = createMongoClientFromUri(connectionString, allowReadFromSecondaries, forceMajority = false)
     changeStreamClient =
       if (supportChangeStreams) createMongoClientFromUri(connectionString, allowReadFromSecondaries = false, forceMajority = true) else null
-    database = client.getDatabase(connectionString.database!!)
+    internalDatabase = client.getDatabase(connectionString.database!!)
     mongoCollections = this.getCollections()
-      .map { (clazz, collectionName) -> clazz to MongoCollection(database.getCollection(collectionName), clazz) }
+      .map { (clazz, collectionName) -> clazz to MongoCollection(internalDatabase.getCollection(collectionName), clazz) }
       .toMap()
 
     changeStreamCollections = if (supportChangeStreams) {
@@ -86,7 +85,7 @@ abstract class MongoDatabase(
     if (createNonExistentCollections) {
       // Create collections which don't exist
       val newCollections = this.getCollections()
-        .filter { it.value !in database.listCollectionNames() }
+        .filter { it.value !in internalDatabase.listCollectionNames() }
 
       val cappedCollectionsMaxBytes = this.getCappedCollectionsMaxBytes()
 
@@ -95,9 +94,9 @@ abstract class MongoDatabase(
         newCollections.forEach { (collectionClass, collectionName) ->
           val cappedCollectionMaxBytes = cappedCollectionsMaxBytes[collectionClass]
           if (cappedCollectionMaxBytes == null) {
-            database.createCollection(collectionName)
+            internalDatabase.createCollection(collectionName)
           } else {
-            database.createCollection(collectionName, CreateCollectionOptions().capped(true).sizeInBytes(cappedCollectionMaxBytes))
+            internalDatabase.createCollection(collectionName, CreateCollectionOptions().capped(true).sizeInBytes(cappedCollectionMaxBytes))
           }
 
           println("Successfully created collection $collectionName")
@@ -702,7 +701,7 @@ abstract class MongoDatabase(
         })
         put("verbosity", "queryPlanner")
       }
-      val res = database.runCommand(explainCommand)
+      val res = internalDatabase.runCommand(explainCommand)
       val winningPlan = (res.getValue("queryPlanner") as Document).getValue("winningPlan") as Document
       fun getPipeline(stage: Document): List<String> {
         return listOf(stage.getValue("stage") as String) + ((stage["inputStage"] as? Document)?.let { inputStage -> getPipeline(inputStage) }
