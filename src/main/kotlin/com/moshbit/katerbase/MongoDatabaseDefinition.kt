@@ -1,6 +1,7 @@
 package com.moshbit.katerbase
 
 import com.mongodb.client.model.IndexOptions
+import com.mongodb.client.model.Indexes
 import org.bson.conversions.Bson
 import kotlin.reflect.KClass
 
@@ -15,9 +16,20 @@ class MongoDatabaseDefinition {
 
     val indexes = mutableListOf<Index>()
 
-    fun index(index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null) {
-      indexes.add(Index(index, partialIndex, indexOptions))
+    fun index(vararg index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null) {
+      when (index.count()) {
+        0 -> throw IllegalArgumentException("Index must be specified")
+        1 -> indexes.add(Index(index.first(), partialIndex, indexOptions))
+        else -> indexes.add(Index(Indexes.compoundIndex(*index), partialIndex, indexOptions))
+      }
     }
+
+    fun MongoEntryField<*>.ascending(): Bson = Indexes.ascending(name)
+
+    fun MongoEntryField<*>.descending(): Bson = Indexes.descending(name)
+
+    // https://docs.mongodb.com/manual/text-search/#text-index
+    fun MongoEntryField<*>.textIndex(): Bson = Indexes.text(name)
   }
 
   val collections = mutableListOf<Collection<*>>()

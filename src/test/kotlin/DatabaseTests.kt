@@ -1,4 +1,3 @@
-import com.mongodb.client.model.Indexes
 import com.moshbit.katerbase.*
 import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
@@ -476,13 +475,8 @@ class DatabaseTests {
     fun setup() {
       testDb = MongoDatabase("mongodb://localhost:27017/local") {
         collection<EnumMongoPayload>("enumColl") {
-          index(EnumMongoPayload::value1.toMongoField().ascending())
-          index(
-            Indexes.compoundIndex(
-              EnumMongoPayload::value1.toMongoField().ascending(),
-              EnumMongoPayload::date.toMongoField().ascending()
-            )
-          )
+          index(EnumMongoPayload::value1.ascending())
+          index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
         }
         collection<SimpleMongoPayload>("simpleMongoColl")
         collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload

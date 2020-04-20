@@ -1,6 +1,9 @@
 package com.moshbit.katerbase
 
-import com.mongodb.client.model.*
+import com.mongodb.client.model.Accumulators
+import com.mongodb.client.model.Aggregates
+import com.mongodb.client.model.BsonField
+import com.mongodb.client.model.Projections
 import org.bson.Document
 import org.bson.conversions.Bson
 import java.util.*
@@ -143,15 +146,6 @@ private class FakeProperty<T, R>(override val name: String) : KMutableProperty1<
 }
 
 class MongoField(val name: String) {
-
-  // Indexes
-  fun ascending(): Bson = Indexes.ascending(name)
-
-  fun descending(): Bson = Indexes.descending(name)
-
-  // https://docs.mongodb.com/manual/text-search/#text-index
-  fun textIndex(): Bson = Indexes.text(name)
-
   fun extend(name: String) = MongoField(this.name + '.' + name)
   fun extendWithCursor(name: String) = MongoField(this.name + ".$." + name)
 

@@ -108,11 +108,11 @@ class MoviesExample {
     fun setup() {
       database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
         collection<Movie>("movies") {
-          index(Movie::name.toMongoField().textIndex())
+          index(Movie::name.textIndex())
         }
         collection<User>("users") {
-          index(User::email.toMongoField().ascending(), indexOptions = { unique(true) })
-          index(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
+          index(User::email.ascending(), indexOptions = { unique(true) })
+          index(User::ratings.child(User.MovieRating::date).ascending())
         }
         collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
       }
