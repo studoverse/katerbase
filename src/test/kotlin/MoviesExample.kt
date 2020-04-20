@@ -5,7 +5,6 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.util.*
-import kotlin.reflect.KClass
 
 @TestMethodOrder(MethodOrderer.Alphanumeric::class)
 class MoviesExample {
@@ -107,28 +106,16 @@ class MoviesExample {
     @BeforeAll
     @JvmStatic
     fun setup() {
-      database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
-        override fun getCollections(): Map<out KClass<out MongoMainEntry>, String> = mapOf(
-          Movie::class to "movies",
-          User::class to "users",
-          SignIn::class to "signInLogging"
-        )
-
-        override fun getIndexes() {
-          with(getCollection<Movie>()) {
-            createIndex(Movie::name.toMongoField().textIndex())
-          }
-          with(getCollection<User>()) {
-            createIndex(User::email.toMongoField().ascending(), indexOptions = { unique(true) })
-            createIndex(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
-          }
+      database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
+        collection<Movie>("movies") {
+          index(Movie::name.toMongoField().textIndex())
         }
-
-        override fun getCappedCollectionsMaxBytes(): Map<out KClass<out MongoMainEntry>, Long> = mapOf(
-          SignIn::class to 1024L * 1024L // 1 MB
-        )
+        collection<User>("users") {
+          index(User::email.toMongoField().ascending(), indexOptions = { unique(true) })
+          index(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
+        }
+        collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
       }
-
       // For testing purposes, clean all data
       database.getCollection<User>().deleteMany()
       database.getCollection<Movie>().deleteMany()

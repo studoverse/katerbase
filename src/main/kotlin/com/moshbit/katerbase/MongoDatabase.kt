@@ -31,11 +31,12 @@ import kotlin.reflect.full.memberProperties
  * 7) Check if it worked using Studio 3t or just type "mongo" to open the mongo shell.
  */
 
-abstract class MongoDatabase(
+open class MongoDatabase(
   uri: String,
   allowReadFromSecondaries: Boolean = false,
   private val supportChangeStreams: Boolean = false,
-  createNonExistentCollections: Boolean = false
+  createNonExistentCollections: Boolean = false,
+  collections: MongoDatabaseDefinition.() -> Unit
 ) {
   protected val isReplicaSet: Boolean
   protected val client: MongoClient
@@ -43,10 +44,6 @@ abstract class MongoDatabase(
   protected val mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
   protected val changeStreamClient: MongoClient?
   protected val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
-
-  abstract fun getCollections(): Map<out KClass<out MongoMainEntry>, String>
-
-  abstract fun getCappedCollectionsMaxBytes(): Map<out KClass<out MongoMainEntry>, Long>
 
   open fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
@@ -71,43 +68,71 @@ abstract class MongoDatabase(
     changeStreamClient =
       if (supportChangeStreams) createMongoClientFromUri(connectionString, allowReadFromSecondaries = false, forceMajority = true) else null
     internalDatabase = client.getDatabase(connectionString.database!!)
-    mongoCollections = this.getCollections()
-      .map { (clazz, collectionName) -> clazz to MongoCollection(internalDatabase.getCollection(collectionName), clazz) }
-      .toMap()
+
+    val databaseDefinition = MongoDatabaseDefinition().apply { collections() }
+
+    mongoCollections = databaseDefinition.collections.associateBy(
+      keySelector = { it.modelClass },
+      valueTransform = { MongoCollection(internalDatabase.getCollection(it.collectionName), it.modelClass, it.indexes) }
+    )
 
     changeStreamCollections = if (supportChangeStreams) {
       val changeStreamClientDatabase = changeStreamClient!!.getDatabase(connectionString.database!!)
-      this.getCollections()
-        .map { (clazz, collectionName) -> clazz to MongoCollection(changeStreamClientDatabase.getCollection(collectionName), clazz) }
-        .toMap()
+      databaseDefinition.collections.associateBy(
+        keySelector = { it.modelClass },
+        valueTransform = { MongoCollection(changeStreamClientDatabase.getCollection(it.collectionName), it.modelClass, it.indexes) }
+      )
     } else emptyMap()
 
     if (createNonExistentCollections) {
       // Create collections which don't exist
-      val newCollections = this.getCollections()
-        .filter { it.value !in internalDatabase.listCollectionNames() }
-
-      val cappedCollectionsMaxBytes = this.getCappedCollectionsMaxBytes()
+      val newCollections = databaseDefinition.collections
+        .filter { it.collectionName !in internalDatabase.listCollectionNames() }
 
       if (newCollections.isNotEmpty()) {
         println("Creating ${newCollections.size} new collections:")
-        newCollections.forEach { (collectionClass, collectionName) ->
-          val cappedCollectionMaxBytes = cappedCollectionsMaxBytes[collectionClass]
-          if (cappedCollectionMaxBytes == null) {
-            internalDatabase.createCollection(collectionName)
+        newCollections.forEach { newCollection ->
+          if (newCollection.collectionSizeCap == null) {
+            internalDatabase.createCollection(newCollection.collectionName)
           } else {
-            internalDatabase.createCollection(collectionName, CreateCollectionOptions().capped(true).sizeInBytes(cappedCollectionMaxBytes))
+            internalDatabase.createCollection(
+              newCollection.collectionName,
+              CreateCollectionOptions().capped(true).sizeInBytes(newCollection.collectionSizeCap)
+            )
           }
 
-          println("Successfully created collection $collectionName")
+          println("Successfully created collection ${newCollection.collectionName}")
         }
       }
 
-      // Process indexes
-      this.getIndexes()
-      mongoCollections.forEach { (_, collection) -> collection.createIndexes() }
-    } else {
-      this.getIndexes() // Only create indexes in memory but do not actually create it in mongodb, because we need them when using hints
+      // Create and delete indexes in MongoDB
+      mongoCollections.forEach { (_, collection) ->
+        val existingIndexes = collection.internalCollection.listIndexes().toList().map { it["name"] as String }
+
+        // Drop indexes which do not exist in the codebase anymore
+        existingIndexes
+          .filter { indexName -> indexName != "_id_" } // Never drop _id
+          .filter { indexName -> collection.indexes.none { index -> index.indexName == indexName } }
+          .forEach { indexName ->
+            collection.internalCollection.dropIndex(indexName)
+            println("Successfully dropped index $indexName")
+          }
+
+        // Make sure all indices are dropped first before creating new indexes so in case we change a textIndex we don't throw because
+        // only one text index per collection is allowed.
+
+        // Create new indexes which doesn't exist locally
+        collection.indexes
+          .filter { index -> index.indexName !in existingIndexes }
+          .forEach { index ->
+            thread {
+              // Don't wait for this, application can be started without the indexes
+              println("Creating index ${index.indexName} ...")
+              index.createIndex()
+              println("Successfully created index ${index.indexName}")
+            }
+          }
+      }
     }
 
     // Validation for Jackson to avoid serialization/deserialization issues
@@ -121,9 +146,6 @@ abstract class MongoDatabase(
     }
   }
 
-  abstract fun getIndexes()
-
-
   data class PayloadChange<Entry : MongoMainEntry>(
     val _id: String,
     val payload: Entry?, // Payload is not available when operationType is DELETED
@@ -132,11 +154,14 @@ abstract class MongoDatabase(
 
   // Mongo collection wrapper for Kotlin
   inner class MongoCollection<Entry : MongoMainEntry>(
-    val collection: com.mongodb.client.MongoCollection<Document>,
-    private val entryClass: KClass<Entry>
+    val internalCollection: com.mongodb.client.MongoCollection<Document>,
+    private val entryClass: KClass<Entry>,
+    indexes: List<MongoDatabaseDefinition.Collection.Index>
   ) {
 
-    val name: String get() = collection.namespace.collectionName
+    val name: String get() = internalCollection.namespace.collectionName
+
+    internal val indexes: List<MongoIndex> = indexes.map { MongoIndex(it) }
 
     /**
      * This only works if MongoDB is a replica set
@@ -178,7 +203,8 @@ abstract class MongoDatabase(
           }
         }
         try {
-          changeStreamCollections.getValue(entryClass).collection.watch(listOf(pipeline)).apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
+          changeStreamCollections.getValue(entryClass).internalCollection.watch(listOf(pipeline))
+            .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
             .forEach { document ->
               val change = PayloadChange(
                 _id = (document.documentKey!!["_id"] as BsonString).value,
@@ -203,7 +229,10 @@ abstract class MongoDatabase(
     // will get deleted and a new index is created.
     // Keep in mind that changing indexOptions do not create a new index, so you need to manually delete the index or modify the index
     // appropriately in the database.
-    inner class MongoIndex(val bson: Bson, val partialIndex: Document?, val indexOptions: (IndexOptions.() -> Unit)?) {
+    inner class MongoIndex(indexDefinition: MongoDatabaseDefinition.Collection.Index) {
+      val bson: Bson = indexDefinition.index
+      val partialIndex: Document? = indexDefinition.partialIndex?.toFilterDocument()
+      val indexOptions: (IndexOptions.() -> Unit)? = indexDefinition.indexOptions
       val indexName: String
 
       init {
@@ -226,7 +255,7 @@ abstract class MongoDatabase(
         indexName = baseName + partialSuffix
       }
 
-      fun createIndex(): String? = collection.createIndex(bson, IndexOptions()
+      fun createIndex(): String? = internalCollection.createIndex(bson, IndexOptions()
         .background(true)
         .apply {
           if (partialIndex != null) {
@@ -238,41 +267,7 @@ abstract class MongoDatabase(
       )
     }
 
-    private val indexes: MutableList<MongoIndex> = mutableListOf()
-
-    fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null) =
-      indexes.add(MongoIndex(bson = index, partialIndex = partialIndex?.toFilterDocument(), indexOptions = indexOptions))
-
-    fun createIndexes() {
-      val localIndexes = collection.listIndexes().toList().map { it["name"] as String }
-
-      // Drop indexes which do not exist in the codebase anymore
-      localIndexes
-        .asSequence()
-        .filter { indexName -> indexName != "_id_" } // Never drop _id
-        .filter { indexName -> indexes.none { index -> index.indexName == indexName } }
-        .forEach { indexName ->
-          collection.dropIndex(indexName)
-          println("Successfully dropped index $indexName")
-        }
-
-      // Make sure all indices are dropped first before creating new indexes so in case we change a textIndex we don't throw because
-      // only one text index per collection is allowed.
-
-      // Create new indexes which doesn't exist locally
-      indexes
-        .filter { index -> index.indexName !in localIndexes }
-        .forEach { index ->
-          thread {
-            // Don't wait for this, application can be started without the indexes
-            println("Creating index ${index.indexName} ...")
-            index.createIndex()
-            println("Successfully created index ${index.indexName}")
-          }
-        }
-    }
-
-    fun getIndex(indexName: String) = indexes.singleOrNull { it.indexName == indexName }
+    fun getIndex(indexName: String): MongoIndex? = indexes.singleOrNull { it.indexName == indexName }
 
     // Used to create indexes for childFields
     fun <Class, Value> MongoEntryField<out Any>.child(property: KMutableProperty1<Class, Value>): MongoEntryField<Value> {
@@ -280,7 +275,7 @@ abstract class MongoDatabase(
     }
 
     fun drop() {
-      collection.drop()
+      internalCollection.drop()
     }
 
     fun clear(): DeleteResult {
@@ -289,13 +284,13 @@ abstract class MongoDatabase(
 
     fun count(vararg filter: FilterPair): Long {
       if (logAllQueries) println("count: ${filter.toFilterDocument().asJsonString()}")
-      return if (filter.isEmpty()) collection.estimatedDocumentCount() else collection.countDocuments(filter.toFilterDocument())
+      return if (filter.isEmpty()) internalCollection.estimatedDocumentCount() else internalCollection.countDocuments(filter.toFilterDocument())
     }
 
     fun bulkWrite(options: BulkWriteOptions = BulkWriteOptions(), action: BulkOperation.() -> Unit): BulkWriteResult {
       val models = BulkOperation().apply { action(this) }.models
       if (models.isEmpty()) return BulkWriteResult.acknowledged(0, 0, 0, 0, emptyList()) // Acknowledge empty bulk write
-      return collection.bulkWrite(models, options)
+      return internalCollection.bulkWrite(models, options)
     }
 
     private fun Document.toClass() = JsonHandler.fromBson(this, entryClass)
@@ -311,12 +306,12 @@ abstract class MongoDatabase(
     // Single operators
     @Deprecated("Use only for hacks", ReplaceWith("find"))
     fun findDocuments(vararg filter: FilterPair): FindIterable<Document> {
-      return collection.find(filter.toFilterDocument())
+      return internalCollection.find(filter.toFilterDocument())
     }
 
     fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T> {
       return AggregateCursor(
-        mongoIterable = collection.aggregate(
+        mongoIterable = internalCollection.aggregate(
           /*pipeline = */ pipeline.bson,
           /*resultClass = */ Document::class.java
         ),
@@ -333,7 +328,7 @@ abstract class MongoDatabase(
 
     fun find(vararg filter: FilterPair): FindCursor<Entry> {
       if (logAllQueries) println("find: ${filter.toFilterDocument().asJsonString()} (pipeline: ${filter.getExecutionPipeline()})")
-      return collection.find(filter.toFilterDocument()).toClasses()
+      return internalCollection.find(filter.toFilterDocument()).toClasses()
     }
 
     fun findOne(vararg filter: FilterPair): Entry? {
@@ -365,7 +360,7 @@ abstract class MongoDatabase(
      */
     fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
       return DistinctCursor(
-        mongoIterable = collection.distinct(
+        mongoIterable = internalCollection.distinct(
           /*fieldName = */ distinctField.name,
           /*filter = */ filter.toFilterDocument(),
           /*resultClass = */ entryClass.java
@@ -396,7 +391,7 @@ abstract class MongoDatabase(
         append("   mutator: ${mutator.asJsonString()}\n")
         append("   pipeline: ${filter.getExecutionPipeline()}\n")
       })
-      return collection.updateOne(filter.toFilterDocument(), mutator, UpdateOptions().upsert(false))
+      return internalCollection.updateOne(filter.toFilterDocument(), mutator, UpdateOptions().upsert(false))
     }
 
     fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
@@ -413,7 +408,7 @@ abstract class MongoDatabase(
       })
 
       return retryMongoOperationOnDuplicateKeyError {
-        collection.updateOne(arrayOf(filter).toFilterDocument(), mutator, UpdateOptions().upsert(true))
+        internalCollection.updateOne(arrayOf(filter).toFilterDocument(), mutator, UpdateOptions().upsert(true))
       }
     }
 
@@ -432,7 +427,7 @@ abstract class MongoDatabase(
       })
 
       return retryMongoOperationOnDuplicateKeyError {
-        collection.findOneAndUpdate(filter.toFilterDocument(), mutator, options)?.toClass()
+        internalCollection.findOneAndUpdate(filter.toFilterDocument(), mutator, options)?.toClass()
       }
     }
 
@@ -445,7 +440,7 @@ abstract class MongoDatabase(
         append("   mutator: ${mutator.asJsonString()}\n")
         append("   pipeline: ${filter.getExecutionPipeline()}\n")
       })
-      return collection.updateMany(filter.toFilterDocument(), mutator)
+      return internalCollection.updateMany(filter.toFilterDocument(), mutator)
     }
 
     // TODO when updating to mongo-java-driver 4.0 return an InsertOneResult instead of Unit
@@ -453,7 +448,7 @@ abstract class MongoDatabase(
     fun insertOne(document: Entry, upsert: Boolean) {
       if (upsert) {
         retryMongoOperationOnDuplicateKeyError {
-          collection.replaceOne(
+          internalCollection.replaceOne(
             Document().apply { put("_id", document._id) },
             document.toBSONDocument(),
             ReplaceOptions().upsert(true)
@@ -467,7 +462,7 @@ abstract class MongoDatabase(
     // TODO when updating to mongo-java-driver 4.0 return an InsertOneResult instead of Unit
     fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)) {
       try {
-        collection.insertOne(document.toBSONDocument())
+        internalCollection.insertOne(document.toBSONDocument())
       } catch (e: MongoServerException) {
         if (e.code == 11000 && e.message?.matches(Regex(".*E11000 duplicate key error collection: .* index: _id_ dup key:.*")) == true) {
           onDuplicateKey.invoke()
@@ -480,12 +475,12 @@ abstract class MongoDatabase(
     fun deleteOne(vararg filter: FilterPair): DeleteResult {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
       if (logAllQueries) println("deleteOne: ${filter.toFilterDocument().asJsonString()}")
-      return collection.deleteOne(filter.toFilterDocument())
+      return internalCollection.deleteOne(filter.toFilterDocument())
     }
 
     fun deleteMany(vararg filter: FilterPair): DeleteResult {
       if (logAllQueries) println("deleteMany: ${filter.toFilterDocument().asJsonString()}")
-      return collection.deleteMany(filter.toFilterDocument())
+      return internalCollection.deleteMany(filter.toFilterDocument())
     }
 
     /**

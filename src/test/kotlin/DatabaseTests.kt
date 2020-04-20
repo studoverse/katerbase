@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test
 import util.addYears
 import util.forEachAsync
 import java.util.*
-import kotlin.reflect.KClass
 
 class DatabaseTests {
 
@@ -73,7 +72,7 @@ class DatabaseTests {
     // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumList
 
     testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumList")
-    testDb.getCollection<EnumMongoPayload>().collection.insertOne(
+    testDb.getCollection<EnumMongoPayload>().internalCollection.insertOne(
       Document(
         listOf(
           "_id" to "faultyEnumList",
@@ -475,26 +474,18 @@ class DatabaseTests {
     @BeforeAll
     @JvmStatic
     fun setup() {
-      testDb = object : MongoDatabase("mongodb://localhost:27017/local") {
-
-        override fun getCappedCollectionsMaxBytes(): Map<out KClass<out MongoMainEntry>, Long> = emptyMap()
-
-        override fun getCollections(): Map<out KClass<out MongoMainEntry>, String> = mapOf(
-          EnumMongoPayload::class to "enumColl",
-          SimpleMongoPayload::class to "simpleMongoColl",
-          NullableSimpleMongoPayload::class to "simpleMongoColl" // Use the same underlying mongoDb collection as SimpleMongoPayload
-        )
-
-
-        override fun getIndexes() {
-          getCollection<EnumMongoPayload>().createIndex(EnumMongoPayload::value1.toMongoField().ascending())
-          getCollection<EnumMongoPayload>().createIndex(
+      testDb = MongoDatabase("mongodb://localhost:27017/local") {
+        collection<EnumMongoPayload>("enumColl") {
+          index(EnumMongoPayload::value1.toMongoField().ascending())
+          index(
             Indexes.compoundIndex(
               EnumMongoPayload::value1.toMongoField().ascending(),
               EnumMongoPayload::date.toMongoField().ascending()
             )
           )
         }
+        collection<SimpleMongoPayload>("simpleMongoColl")
+        collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
       }
     }
   }
