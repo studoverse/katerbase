@@ -36,6 +36,7 @@ open class MongoDatabase(
   allowReadFromSecondaries: Boolean = false,
   private val supportChangeStreams: Boolean = false,
   createNonExistentCollections: Boolean = false,
+  clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
 ) {
   protected val client: MongoClient
@@ -60,9 +61,24 @@ open class MongoDatabase(
 
     val connectionString = ConnectionString(uri)
 
-    client = createMongoClientFromUri(connectionString, allowReadFromSecondaries, forceMajority = false)
-    changeStreamClient =
-      if (supportChangeStreams) createMongoClientFromUri(connectionString, allowReadFromSecondaries = false, forceMajority = true) else null
+    client = createMongoClientFromUri(
+      connectionString, allowReadFromSecondaries = allowReadFromSecondaries,
+      clientSettings = clientSettings
+    )
+
+    changeStreamClient = if (supportChangeStreams) {
+      createMongoClientFromUri(connectionString, allowReadFromSecondaries = false, clientSettings = {
+        readPreference(ReadPreference.primaryPreferred())
+
+        // ChangeStreams work until MongoDB 4.2 only with ReadConcern.MAJORITY, see https://docs.mongodb.com/manual/changeStreams/
+        readConcern(ReadConcern.MAJORITY)
+
+        clientSettings?.invoke(this)
+      })
+    } else {
+      null
+    }
+
     internalDatabase = client.getDatabase(connectionString.database!!)
 
     val databaseDefinition = MongoDatabaseDefinition().apply { collections() }
@@ -718,43 +734,33 @@ open class MongoDatabase(
   companion object {
     var logAllQueries = false // Set this to true if you want to debug your database queries
     private fun Document.asJsonString() = JsonHandler.toJsonString(this)
-    private val ConnectionString.isMultiNodeSetup get() = hosts.size > 1 // true if replication or sharding is in place TODO @Z implement this correctly
 
     fun createMongoClientFromUri(
       connectionString: ConnectionString,
       allowReadFromSecondaries: Boolean,
-      forceMajority: Boolean
+      clientSettings: (MongoClientSettings.Builder.() -> Unit)?
     ): MongoClient {
-      val clientSettings = MongoClientSettings.builder()
+      return MongoClientSettings.builder()
         .applyConnectionString(connectionString)
         .apply {
-          if (forceMajority) {
-            // This mode is only used for ChangeStream operations
-            readPreference(ReadPreference.primaryPreferred())
-            readConcern(ReadConcern.MAJORITY)
-            writeConcern(WriteConcern.MAJORITY)
-          } else when {
-            connectionString.isMultiNodeSetup && allowReadFromSecondaries -> { // Only allow read from secondaries on a multi node setup
+          when {
+            allowReadFromSecondaries -> {
               // Set maxStalenessSeconds, see https://docs.mongodb.com/manual/core/read-preference/#maxstalenessseconds
               readPreference(ReadPreference.secondaryPreferred(90L, TimeUnit.SECONDS))
               readConcern(ReadConcern.MAJORITY)
               writeConcern(WriteConcern.MAJORITY)
             }
-            connectionString.isMultiNodeSetup -> {
+            else -> {
               readPreference(ReadPreference.primaryPreferred())
               readConcern(ReadConcern.LOCAL)
               writeConcern(WriteConcern.W1)
             }
-            else -> {
-              readPreference(ReadPreference.primary())
-              readConcern(ReadConcern.LOCAL)
-              writeConcern(WriteConcern.W1)
-            }
           }
+
+          clientSettings?.invoke(this)
         }
         .build()
-
-      return MongoClients.create(clientSettings)
+        .let { MongoClients.create(it) }
     }
   }
 }
