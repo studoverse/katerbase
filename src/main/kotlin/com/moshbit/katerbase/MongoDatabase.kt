@@ -38,7 +38,6 @@ open class MongoDatabase(
   createNonExistentCollections: Boolean = false,
   collections: MongoDatabaseDefinition.() -> Unit
 ) {
-  protected val isReplicaSet: Boolean
   protected val client: MongoClient
   protected val internalDatabase: com.mongodb.client.MongoDatabase
   protected val mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
@@ -60,9 +59,6 @@ open class MongoDatabase(
     setLogLevel("org.mongodb", Level.ERROR)
 
     val connectionString = ConnectionString(uri)
-    isReplicaSet = connectionString.isMultiNodeSetup
-
-    require(!(supportChangeStreams && !isReplicaSet)) { "ChangeStreams are only supported in replica sets" }
 
     client = createMongoClientFromUri(connectionString, allowReadFromSecondaries, forceMajority = false)
     changeStreamClient =
@@ -168,42 +164,46 @@ open class MongoDatabase(
      * To test this set up a local replica set (follow the README in local-development > local-mongo-replica-set)
      * Use [ignoredFields] to exclude a set of fields, if any change occurs to these fields it will be ignored
      */
-    fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), action: (PayloadChange<Entry>) -> Unit): Unit {
-      thread {
-        require(supportChangeStreams) { "ChangeStreams are not enabled" }
-        // Add aggregation pipeline to stream
-        // https://stackoverflow.com/questions/49621939/how-to-watch-for-changes-to-specific-fields-in-mongodb-change-stream
-        val pipeline = Document().apply {
-          this["\$match"] = Document().apply {
-            this["\$or"] = listOf(
-              Document("operationType", "insert"),
-              Document("operationType", "replace"),
-              Document("operationType", "delete"),
-              Document().apply {
-                val filter = mutableListOf<Document>()
-                val ignoredMongoFields = ignoredFields.map { it.toMongoField() }.toSet()
+    fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), action: (PayloadChange<Entry>) -> Unit) {
+      require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation" }
 
-                // Get all the fields where we should listen for changes
-                val nonIgnoredMongoFields = entryClass.memberProperties
-                  .mapNotNull { it as? MongoEntryField<*> }
-                  .map { it.toMongoField() }
-                  .filter { it !in ignoredMongoFields }
+      // Add aggregation pipeline to stream
+      // https://stackoverflow.com/questions/49621939/how-to-watch-for-changes-to-specific-fields-in-mongodb-change-stream
+      val pipeline = Document().apply {
+        this["\$match"] = Document().apply {
+          this["\$or"] = listOf(
+            Document("operationType", "insert"),
+            Document("operationType", "replace"),
+            Document("operationType", "delete"),
+            Document().apply {
+              val filter = mutableListOf<Document>()
+              val ignoredMongoFields = ignoredFields.map { it.toMongoField() }.toSet()
 
-                nonIgnoredMongoFields.forEach { field ->
-                  // Format must look like this -> { "updateDescription.updatedFields.SomeFieldA": { $exists: true } }
-                  filter += Document("updateDescription.updatedFields.${field.name}", Document("\$exists", true))
-                }
+              // Get all the fields where we should listen for changes
+              val nonIgnoredMongoFields = entryClass.memberProperties
+                .mapNotNull { it as? MongoEntryField<*> }
+                .map { it.toMongoField() }
+                .filter { it !in ignoredMongoFields }
 
-                this["\$and"] = listOf(
-                  Document("operationType", "update"),
-                  Document("\$or", filter)
-                )
+              nonIgnoredMongoFields.forEach { field ->
+                // Format must look like this -> { "updateDescription.updatedFields.SomeFieldA": { $exists: true } }
+                filter += Document("updateDescription.updatedFields.${field.name}", Document("\$exists", true))
               }
-            )
-          }
+
+              this["\$and"] = listOf(
+                Document("operationType", "update"),
+                Document("\$or", filter)
+              )
+            }
+          )
         }
+      }
+
+      val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
+
+      thread {
         try {
-          changeStreamCollections.getValue(entryClass).internalCollection.watch(listOf(pipeline))
+          internalCollection.watch(listOf(pipeline))
             .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
             .forEach { document ->
               val change = PayloadChange(
@@ -211,15 +211,22 @@ open class MongoDatabase(
                 payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
                 operationType = document.operationType
               )
-              println("${entryClass.simpleName} (id ${change._id}) ${change.operationType}: ${document.updateDescription}")
               try {
                 action(change)
-              } catch (e: Exception) { // If action fails, print the exception but don't close the ChangeStream
-                println(e)
+              } catch (e: Exception) {
+                // If action fails, handle the exception but do not close the changeStream
+                Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), e) ?: thread { throw e }
               }
             }
-        } catch (e: Exception) {
-          println("ChangeStream closed " + e.message) // This should theoretically never happen!
+        } catch (e: MongoCommandException) {
+          if (e.code == 40573) {
+            // The $changeStream stage is only supported on replica sets
+            throw IllegalStateException("watch() can only be used in a replica set", e)
+          } else {
+            thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
+          }
+        } catch (e: java.lang.Exception) {
+          thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
         }
         watch(ignoredFields, action)
       }
@@ -727,13 +734,9 @@ open class MongoDatabase(
             readConcern(ReadConcern.MAJORITY)
             writeConcern(WriteConcern.MAJORITY)
           } else when {
-            connectionString.isMultiNodeSetup && allowReadFromSecondaries -> { // Only allow read from secondaries if it is a multi node setup
-              readPreference(
-                ReadPreference.secondaryPreferred(
-                  90L,
-                  TimeUnit.SECONDS
-                )
-              ) // Set maxStalenessSeconds, see https://docs.mongodb.com/manual/core/read-preference/#maxstalenessseconds
+            connectionString.isMultiNodeSetup && allowReadFromSecondaries -> { // Only allow read from secondaries on a multi node setup
+              // Set maxStalenessSeconds, see https://docs.mongodb.com/manual/core/read-preference/#maxstalenessseconds
+              readPreference(ReadPreference.secondaryPreferred(90L, TimeUnit.SECONDS))
               readConcern(ReadConcern.MAJORITY)
               writeConcern(WriteConcern.MAJORITY)
             }

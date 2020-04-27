@@ -236,6 +236,7 @@ fun MongoEntryField<String>.endsWith(value: String, caseSensitive: Boolean = tru
 })
 
 infix fun <Value> KMutableProperty1<out MongoEntry, out Collection<Value>>.has(value: Value) = FilterPair(this, value)
+
 infix fun <Value> MongoEntryField<Value>.inArray(array: Collection<Value>): FilterPair {
   return FilterPair(this, Document("\$in", array))
 }
