@@ -35,7 +35,7 @@ open class MongoDatabase(
   uri: String,
   allowReadFromSecondaries: Boolean = false,
   private val supportChangeStreams: Boolean = false,
-  createNonExistentCollections: Boolean = false,
+  autoManageCollectionsAndIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
 ) {
@@ -96,7 +96,7 @@ open class MongoDatabase(
       )
     } else emptyMap()
 
-    if (createNonExistentCollections) {
+    if (autoManageCollectionsAndIndexes) {
       // Create collections which don't exist
       val newCollections = databaseDefinition.collections
         .filter { it.collectionName !in internalDatabase.listCollectionNames() }

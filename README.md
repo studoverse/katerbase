@@ -45,32 +45,25 @@ Check out the Katerbase [read operations](#read-operations) and [write operation
 
 A MongoDB database with all its collections is defined in code. When creating a Katerbase MongoDatabase object, the connection URI must be specified along with the collection definitions:
 ```kotlin
-var database = object : MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
-  override fun getCollections(): Map<out KClass<out MongoMainEntry>, String> = mapOf(
-    Movie::class to "movies",
-    User::class to "users",
-    SignIn::class to "signInLogging"
-  )
-
-  override fun getIndexes() {
-    with(getCollection<Movie>()) {
-      createIndex(Movie::name.toMongoField().textIndex())
-    }
-    with(getCollection<User>()) {
-      createIndex(User::email.toMongoField().ascending(), indexOptions = { unique(true) })
-      createIndex(User::ratings.child(User.MovieRating::date).toMongoField().ascending())
-    }
+var database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
+  collection<Movie>("movies") {
+    index(Movie::name.textIndex())
   }
-
-  override fun getCappedCollectionsMaxBytes(): Map<out KClass<out MongoMainEntry>, Long> = mapOf(
-    SignIn::class to 1024L * 1024L // 1 MB
-  )
+  collection<User>("users") {
+    index(User::email.ascending(), indexOptions = { unique(true) })
+    index(User::ratings.child(User.MovieRating::date).ascending())
+  }
+  collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
 }
 ```
 
+Use the `clientSettings` argument of the `MongoDatabase` constructor to configure the `MongoClientSettings` of the mongo-java-driver, see [MongoDB connection settings](https://mongodb.github.io/mongo-java-driver/3.12/driver/tutorials/connect-to-mongodb/)
+
+The `com.moshbit.katerbase.MongoDatabase` has an `internalDatabase: com.mongodb.client.MongoDatabase` field that exposes the MongoDatabase of the mongo-java-driver to allow all operations that Katerbase doesn't support yet.
+
 ### Collection Setup
 
-Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin model class to  `override fun getCollections()` If `createNonExistentCollections` is set, Katerbase will automatically create the defined collection.
+Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin model class to  the `collection` constructor argument of the `MongoDatabase`, see [database setup](#database-setup). As long as `autoManageCollectionsAndIndexes` is not disabled, Katerbase will automatically create the defined collection.
  
 ```kotlin
 class Movie : MongoMainEntry() {
@@ -125,7 +118,7 @@ The returned `FindCursor` is an `Iterable`. Before iterating though the objects 
 * `sortByDescending(field: MongoEntryField)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/)
 * `sort(bson: Bson)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/): Direct `Bson` access, use only if `sortBy` and `sortByDescending` are insufficient.
 
-The order of the `FindCursor` operations do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should only be iterated once, as each iteration results in a network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
+The order of the `FindCursor` operations do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should only be iterated once, as each iteration results in a network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
 
 Example usage:
 ```kotlin
@@ -171,7 +164,7 @@ Counts how many matching documents in a collection are. If the filter is empty, 
 
 Returns an `Iterable` of the specified field with no duplicates. E.g. `col.distinct(Book::author)` returns an `Iterable<String>` with unique Strings. When applying filtering you get e.g. by calling `col.distinct(Book::author, Book::yearPublished lower 2000)` all author names that have published at least one book before year 2000.
 
-As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration results in a network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.8/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` if you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
+As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration results in a network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` if you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
 
 In case `T` can't be reified, pass the `entryClass` to the overloaded function
 `fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
@@ -381,7 +374,7 @@ The returned [DeleteResult](https://mongodb.github.io/mongo-java-driver/3.12/jav
 
 [db.collection.drop()](https://docs.mongodb.com/manual/reference/method/db.collection.drop/) MongoDB operation
 
-Removes a collection from the database. When Katerbase is initialized with `createNonExistentCollections = true`, the collection will be automatically created next time the MongoDatabase is initialized with Katerbase.
+Removes a collection from the database. As long as Katerbase is not initialized with `autoManageCollectionsAndIndexes = false`, the collection will be automatically created next time the `MongoDatabase` is initialized with Katerbase.
 
 
 ### clear
@@ -497,10 +490,24 @@ col.bulkWrite {
 
 
 ### Indexes
-`fun createIndex(index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null)`
+`fun index(vararg index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null)`
 
-All specified indexes will be automatically created by Katerbase when `createNonExistentCollections` is set.
-Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying a `partialIndex`. All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility when creating the index.
+Indexes are defined inside each collection definition (see [database setup](#database-setup)) with the `index()` function:
+
+```kotlin
+colections = {
+  collection<Movie>("movies") {
+    index(Movie::name.textIndex())
+    index(Movie::name.ascending(), partialIndex = arrayOf(BackendCv::name notEqual ""))
+  }
+  collection<User>("users") {
+    index(User::email.ascending(), indexOptions = { unique(true) })
+    index(User::ratings.child(User.MovieRating::date).ascending())
+  }
+}
+```
+
+Both single field indexes and compound indexes are supported. Each index can be furthermore configured by specifying a [partialIndex](https://docs.mongodb.com/manual/core/index-partial/). All mongo-java-driver [IndexOptions](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/model/IndexOptions.html) are also exposed via `indexOptions`, so you have full flexibility when creating the index.
 
 Each index field must be one of the following:
 * ascending
@@ -509,6 +516,13 @@ Each index field must be one of the following:
 
 The [indexes MongoDB documentation](https://docs.mongodb.com/manual/indexes/) explains the index handling in more details.
 
+Indexes are named based on the `index: Bson` and `partialIndex: Array<FilterPair>`, so Katerbase can delete indexes that are not any more defined in the code and create new indexes. If an index is changed in code, the next time Katerbase initializes the database the new index gets created and the old index gets deleted. Note that this does not apply to custom `indexOptions`: When changing the `indexOptions` in code, make sure you update the corresponding indexOption also in MongoDB or delete the index in MongoDB and let Katerbase create the new index.
+
+All specified indexes will be automatically created by Katerbase when `autoManageCollectionsAndIndexes` is set in the `MongoDatabase` constructor. The default value is `true`, so in case you do not want to manage your MongoDB collections and indexes via Katerbase set `autoManageCollectionsAndIndexes` to `false`. If set to false, no collections are created or deleted and no indexes get created or deleted by Katerbase. This mode can be useful if you manage the collections and indexes not in the project where Katerbase is used but on another project. Also if you start multiple JVM executables with Katerbase concurrently, make sure that only one executable has `autoManageCollectionsAndIndexes` enabled, since the management of the collections and indexes is not atomic.
+
+```kotlin
+database = MongoDatabase("mongodb://localhost:27017/moviesDatabase", autoManageCollectionsAndIndexes = false, collections = { /* ... */ })
+```
 
 ### Type mapping
 
@@ -569,3 +583,5 @@ All Kotlin field values can be nullable, in that case `null` will be stored in t
 
 ## Project state
 Katerbase evolved from a few extensions functions that were created in December 2016 to a bunch of internally used MongoDB utility functions. The utility functions are currently used at [Moshbit](https://moshbit.com) in several projects. In 2019, we decided to create a standalone library out of the proofed mongo-java-driver wrapper functions. The library design was adapted several times to provide the goal of Katerbase: Writing concise and simple MongoDB queries without any boilerplate or ceremony. Many thanks to [@functionaldude](https://github.com/functionaldude) for all the long design discussions that lead into the current state of the project.
+
+It is planned to move Katerbase to the async driver of the mongo-java-driver and incorporate Kotlin coroutines into that.
