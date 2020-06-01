@@ -623,6 +623,22 @@ open class MongoDatabase(
       }
 
       /**
+       * Use this if you want to change value if the specified value is lower than the current value of the field
+       * More info: https://docs.mongodb.com/manual/reference/operator/update/min/
+       */
+      infix fun <Value : Number> MongoEntryField<Value>.min(value: Value) {
+        updateMutator(operator = "min", mutator = MutatorPair(this, value))
+      }
+
+      /**
+       * Use this if you want to change value if the specified value is greater than the current value of the field
+       * More info: https://docs.mongodb.com/manual/reference/operator/update/max/
+       */
+      infix fun <Value : Number> MongoEntryField<Value>.max(value: Value) {
+        updateMutator(operator = "max", mutator = MutatorPair(this, value))
+      }
+
+      /**
        * Use this if you want to push a new item to a list
        * More info: https://docs.mongodb.com/manual/reference/operator/update/push/
        */

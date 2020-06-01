@@ -446,9 +446,11 @@ Use `aggregationPipeline` to start a new aggregation. The following operators ar
 * setToOnInsert
 * incrementBy
 * multiplyBy
+* min
+* max
 * push
 * pull
-* pullWHere
+* pullWhere
 * child
 * childWithCursor
 
