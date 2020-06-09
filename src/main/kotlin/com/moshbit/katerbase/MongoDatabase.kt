@@ -435,12 +435,17 @@ open class MongoDatabase(
       }
     }
 
-    fun updateOneAndFind(vararg filter: FilterPair, upsert: Boolean = false, update: UpdateOperation.() -> Unit): Entry? {
+    fun updateOneAndFind(
+      vararg filter: FilterPair,
+      upsert: Boolean = false,
+      returnDocument: ReturnDocument = ReturnDocument.AFTER,
+      update: UpdateOperation.() -> Unit
+    ): Entry? {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
       val mutator = UpdateOperation().apply { update(this) }.mutator
       val options = FindOneAndUpdateOptions().apply {
         upsert(upsert)
-        returnDocument(ReturnDocument.AFTER)
+        returnDocument(returnDocument)
       }
       if (logAllQueries) println(buildString {
         append("updateOneAndFind:\n")
