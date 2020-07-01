@@ -241,8 +241,15 @@ infix fun <Value> MongoEntryField<Value>.inArray(array: Collection<Value>): Filt
   return FilterPair(this, Document("\$in", array))
 }
 
+infix fun <Value> MongoEntryField<Value>.notInArray(array: Collection<Value>): FilterPair {
+  return FilterPair(this, Document("\$nin", array))
+}
+
 infix fun <Value> KMutableProperty1<out MongoEntry, out Collection<Value>>.hasAnyInArray(array: Collection<Value>) =
   FilterPair(this, Document("\$in", array))
+
+infix fun <Value> KMutableProperty1<out MongoEntry, out Collection<Value>>.hasNoneInArray(array: Collection<Value>) =
+    FilterPair(this, Document("\$nin", array))
 
 infix fun <Value> MongoEntryField<Value>.lower(value: Value) = FilterPair(this, Document("\$lt", value))
 infix fun <Value> MongoEntryField<Value>.lowerEquals(value: Value) = FilterPair(this, Document("\$lte", value))
