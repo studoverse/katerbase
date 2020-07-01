@@ -424,7 +424,9 @@ Use `aggregationPipeline` to start a new aggregation. The following operators ar
 * endsWith
 * has
 * inArray
+* notInArray
 * hasAnyInArray
+* hasNoneInArray
 * lower
 * lowerEquals
 * greater
