@@ -53,7 +53,7 @@ object JsonHandler {
   private val valueMethodCache = ConcurrentHashMap<KClass<out Any>, Method>(50, 9.0f, 1)
 
   private class ClassDescriptor<T : Any>(kClass: KClass<T>) {
-    val enumListTypes: List<Pair<KProperty<*>, KClass<*>>>
+    val enumIterableTypes: List<Pair<KProperty<*>, KClass<*>>>
     val nonNullableListTypes: List<KProperty<*>>
 
     init {
@@ -61,13 +61,13 @@ object JsonHandler {
 
       nonNullableListTypes = kotlinProperties.filter { it.returnType.isSubtypeOf(nonNullableListType) }
 
-      enumListTypes = kotlinProperties
-        .filter { it.returnType.isSubtypeOf(enumListType) }
+      enumIterableTypes = kotlinProperties
+        .filter { it.returnType.isSubtypeOf(enumIterableType) }
         .map { it to it.returnType.arguments.first().type!!.classifier as KClass<*> }
     }
 
     companion object {
-      private val enumListType = List::class.createType(
+      private val enumIterableType = Iterable::class.createType(
         listOf(
           KTypeProjection(
             variance = KVariance.INVARIANT, type = Enum::class.createType(
@@ -155,7 +155,7 @@ object JsonHandler {
         because READ_UNKNOWN_ENUM_VALUES_AS_NULL is enabled.
         So always set these vars manually, and get every enum value with "valueOf" method
       */
-      classDescriptor.enumListTypes.forEach { (property, enumClass) ->
+      classDescriptor.enumIterableTypes.forEach { (property, enumClass) ->
         val valueOfMethod =
           valueMethodCache.getOrPut(enumClass) { enumClass.java.declaredMethods.find { it.name == "valueOf" }!! } // Cache this because declaredMethods is expensive
         val stringValues = tree[property.name]?.map { it.textValue()!! }

@@ -16,6 +16,7 @@ class DatabaseTests {
 
     var value1 = Enum1.VALUE1
     var enumList: List<Enum1> = emptyList()
+    var enumSet: Set<Enum1> = emptySet()
     var date = Date()
     var long = 0L
     var stringList: List<String> = emptyList()
@@ -84,9 +85,38 @@ class DatabaseTests {
 
     val result = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumList")
 
-    assert(result!!.enumList.size == 2)
-    assert(result.enumList[0] == EnumMongoPayload.Enum1.VALUE1)
-    assert(result.enumList[1] == EnumMongoPayload.Enum1.VALUE3)
+    assertEquals(2, result!!.enumList.size)
+    assertEquals(EnumMongoPayload.Enum1.VALUE1, result.enumList[0])
+    assertEquals(EnumMongoPayload.Enum1.VALUE3, result.enumList[1])
+  }
+
+  @Test
+  fun faultyEnumSet() {
+    // Katerbase will print those 2 warnings on stdout:
+    // Array enumSet in EnumMongoPayload contains null, but is a non-nullable collection: _id=faultyEnumSet
+    // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumSet
+
+    testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumSet")
+    testDb.getCollection<EnumMongoPayload>().internalCollection.insertOne(
+      Document(
+        setOf(
+          "_id" to "faultyEnumSet",
+          "enumSet" to setOf(
+            "VALUE1", "FAULTY", null, "VALUE3"
+          )
+        ).toMap()
+      )
+    )
+
+    val result = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumSet")
+
+    assertEquals(2, result!!.enumSet.size)
+
+    val enumListSorted = result.enumSet.toList().sorted()
+
+    assertEquals(2, enumListSorted.size)
+    assertEquals(EnumMongoPayload.Enum1.VALUE1, enumListSorted[0])
+    assertEquals(EnumMongoPayload.Enum1.VALUE3, enumListSorted[1])
   }
 
   @Test
@@ -205,7 +235,7 @@ class DatabaseTests {
     val payload = EnumMongoPayload()
     val bson = payload.toBSONDocument()
     assert(bson["computedProp"] == null)
-    assertEquals(11, bson.size)
+    assertEquals(12, bson.size)
   }
 /*
   @Test
