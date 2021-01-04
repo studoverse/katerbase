@@ -1,6 +1,7 @@
 package com.moshbit.katerbase
 
 import com.fasterxml.jackson.core.JsonProcessingException
+import com.mongodb.MongoCursorNotFoundException
 import com.mongodb.client.AggregateIterable
 import com.mongodb.client.DistinctIterable
 import com.mongodb.client.FindIterable
@@ -10,6 +11,7 @@ import org.bson.BsonDocument
 import org.bson.BsonInt32
 import org.bson.Document
 import org.bson.conversions.Bson
+import java.io.IOException
 import kotlin.reflect.KClass
 
 class DistinctCursor<Entry : Any>(val mongoIterable: DistinctIterable<Entry>, private val clazz: KClass<Entry>) : Iterable<Entry> {
@@ -29,6 +31,7 @@ class FindCursor<Entry : MongoMainEntry>(
 
   private var limit = 0
   private var skip = 0
+  private var batchSize = 0
   private var projection = BsonDocument()
   private var sort: Bson? = null
   private var hint: Bson? = null
@@ -43,6 +46,11 @@ class FindCursor<Entry : MongoMainEntry>(
   fun skip(skip: Int): FindCursor<Entry> = apply {
     mongoIterable.skip(skip)
     this.skip = skip
+  }
+
+  fun batchSize(batchSize: Int): FindCursor<Entry> = apply {
+    mongoIterable.batchSize(batchSize)
+    this.batchSize = batchSize
   }
 
   fun hint(indexName: String): FindCursor<Entry> =
@@ -106,6 +114,7 @@ class FindCursor<Entry : MongoMainEntry>(
     if (clazz != other.clazz) return false
     if (limit != other.limit) return false
     if (skip != other.skip) return false
+    if (batchSize != other.batchSize) return false
     if (projection != other.projection) return false
     if (sort != other.sort) return false
     if (hint != other.hint) return false
@@ -118,6 +127,7 @@ class FindCursor<Entry : MongoMainEntry>(
     var result = clazz.hashCode()
     result = 31 * result + limit
     result = 31 * result + skip
+    result = 31 * result + batchSize
     result = 31 * result + projection.hashCode()
     result = 31 * result + (sort?.hashCode() ?: 0)
     result = 31 * result + (hint?.hashCode() ?: 0)
@@ -147,6 +157,13 @@ private fun <Entry : Any> iteratorForDocumentClass(
       JsonHandler.fromBson(document, clazz)
     } catch (e: JsonProcessingException) {
       throw IllegalArgumentException("Could not deserialize mongo entry of type ${clazz.simpleName} with id ${document["_id"]}", e)
+    } catch (e: MongoCursorNotFoundException) {
+      throw IOException(
+        "Cursor was not (any more) found. " +
+            "In case iterating over a large result and doing longer operations in the iteration, " +
+            "consider using .batchSize() to not timeout the MongoCursor. " +
+            "See https://docs.mongodb.com/manual/tutorial/iterate-a-cursor/#cursor-batches", e
+      )
     }
   }
 }
