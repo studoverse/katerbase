@@ -126,8 +126,10 @@ open class MongoDatabase(
           .filter { indexName -> indexName != "_id_" } // Never drop _id
           .filter { indexName -> collection.indexes.none { index -> index.indexName == indexName } }
           .forEach { indexName ->
-            collection.internalCollection.dropIndex(indexName)
-            println("Successfully dropped index $indexName")
+            thread {
+              collection.internalCollection.dropIndex(indexName)
+              println("Successfully dropped index $indexName")
+            }
           }
 
         // Make sure all indices are dropped first before creating new indexes so in case we change a textIndex we don't throw because
