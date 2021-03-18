@@ -34,6 +34,7 @@ import kotlin.reflect.full.memberProperties
 open class MongoDatabase(
   uri: String,
   allowReadFromSecondaries: Boolean = false,
+  useMajorityWrite: Boolean = allowReadFromSecondaries,
   private val supportChangeStreams: Boolean = false,
   autoManageCollectionsAndIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
@@ -62,12 +63,12 @@ open class MongoDatabase(
     val connectionString = ConnectionString(uri)
 
     client = createMongoClientFromUri(
-      connectionString, allowReadFromSecondaries = allowReadFromSecondaries,
+      connectionString, allowReadFromSecondaries = allowReadFromSecondaries, useMajorityWrite = useMajorityWrite,
       clientSettings = clientSettings
     )
 
     changeStreamClient = if (supportChangeStreams) {
-      createMongoClientFromUri(connectionString, allowReadFromSecondaries = false, clientSettings = {
+      createMongoClientFromUri(connectionString, allowReadFromSecondaries = false, useMajorityWrite = false, clientSettings = {
         readPreference(ReadPreference.primaryPreferred())
 
         // ChangeStreams work until MongoDB 4.2 only with ReadConcern.MAJORITY, see https://docs.mongodb.com/manual/changeStreams/
@@ -348,6 +349,13 @@ open class MongoDatabase(
       return aggregate(
         pipeline = aggregationPipeline(pipeline),
         entryClass = T::class
+      )
+    }
+
+    fun sample(size: Int): AggregateCursor<Entry> {
+      return aggregate(
+        pipeline = aggregationPipeline { sample(size) },
+        entryClass = entryClass
       )
     }
 
@@ -761,8 +769,12 @@ open class MongoDatabase(
     fun createMongoClientFromUri(
       connectionString: ConnectionString,
       allowReadFromSecondaries: Boolean,
+      useMajorityWrite: Boolean,
       clientSettings: (MongoClientSettings.Builder.() -> Unit)?
     ): MongoClient {
+      if (!useMajorityWrite && allowReadFromSecondaries) {
+        throw IllegalArgumentException("Reading from secondaries requires useMajorityWrite = true")
+      }
       return MongoClientSettings.builder()
         .applyConnectionString(connectionString)
         .apply {
@@ -776,7 +788,12 @@ open class MongoDatabase(
             else -> {
               readPreference(ReadPreference.primaryPreferred())
               readConcern(ReadConcern.LOCAL)
-              writeConcern(WriteConcern.W1)
+
+              if (useMajorityWrite) {
+                writeConcern(WriteConcern.MAJORITY)
+              } else {
+                writeConcern(WriteConcern.W1)
+              }
             }
           }
 

@@ -98,6 +98,13 @@ fun <Class, Value> NullableMongoEntryField<out Any>.child(property: KMutableProp
 }
 
 /**
+ * Use this if you want to access a map's value using the key.
+ */
+fun <Value> MongoEntryField<Map<String, Value>>.child(key: String): MongoEntryField<Value> {
+  return this.toMongoField().extend(key).toProperty()
+}
+
+/**
  * Use this if you have an array of classes. This filter returns every document where in the array
  * every filter matches at least one subdocument
  */
@@ -295,6 +302,10 @@ fun aggregationPipeline(block: AggregationPipeline.() -> Unit): AggregationPipel
 
 class AggregationPipeline {
   val bson: MutableList<Bson> = mutableListOf()
+
+  fun sample(size: Int) {
+    bson += Aggregates.sample(size)
+  }
 
   fun match(vararg filter: FilterPair) {
     bson += Aggregates.match(filter.toFilterDocument())
