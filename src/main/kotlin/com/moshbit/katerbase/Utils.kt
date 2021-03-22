@@ -10,12 +10,12 @@ internal fun setLogLevel(name: String, level: Level) {
   (StaticLoggerBinder.getSingleton().loggerFactory.getLogger(name) as Logger).level = level
 }
 
-fun ByteArray.sha256(): String {
+internal fun ByteArray.sha256(): String {
   val md = MessageDigest.getInstance("SHA-256")
   val hex = md.digest(this)
   return Hex.encodeHexString(hex)
 }
 
-fun String.sha256(): String {
+internal fun String.sha256(): String {
   return this.toByteArray().sha256()
 }

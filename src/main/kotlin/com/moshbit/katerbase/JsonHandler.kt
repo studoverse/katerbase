@@ -46,7 +46,7 @@ object JsonHandler {
     .setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)
     .registerKotlinModule()
 
-  private fun <T : Any> ObjectMapper.constructCollectionType(kClass: KClass<T>) =
+  fun <T : Any> ObjectMapper.constructCollectionType(kClass: KClass<T>) =
     typeFactory.constructCollectionType(List::class.java, kClass.java)
 
   private val classMap = ConcurrentHashMap<String, ClassDescriptor<out Any>>(50, 9.0f, 1)
