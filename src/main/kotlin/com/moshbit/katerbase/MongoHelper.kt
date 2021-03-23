@@ -324,7 +324,7 @@ class AggregationPipeline {
     bson += Aggregates.group("\$${field.name}", accumulators.map { it.bsonField })
   }
 
-  // Use this when you want to simly just include some of the fields
+  // Use this when you want to simply just include some of the fields
   fun project(vararg selectedFields: MongoEntryField<*>) {
     bson += Aggregates.project(selectedFields.includeBson())
   }
