@@ -279,7 +279,7 @@ fun <Value> MongoEntryField<Value>.inRange(start: Value, end: Value, includeStar
   })
 
 // Keep in mind that this query can't be indexed (unless using probably a space index)
-fun <Value> MongoEntryField<Value>.exists(value: Boolean = true) = FilterPair(this, Document("\$exists", value))
+infix fun <Value> MongoEntryField<Value>.exists(value: Boolean) = FilterPair(this, Document("\$exists", value))
 
 // MutatorPair
 
