@@ -35,13 +35,13 @@ abstract class MongoMainEntry : MongoEntry() {
   companion object {
     private val random = Random()
 
-    internal fun randomId(): String {
+    fun randomId(): String {
       val bytes = ByteArray(size = 16) // 16 * 8 = 256 -> full entropy for sha256
       random.nextBytes(bytes)
       return bytes.sha256().take(32)
     }
 
-    internal fun generateId(compoundValue: String, vararg compoundValues: String): String {
+    fun generateId(compoundValue: String, vararg compoundValues: String): String {
       return compoundValues.joinToString(separator = "|", prefix = "$compoundValue|").sha256().take(32)
     }
   }
