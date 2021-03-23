@@ -224,6 +224,14 @@ fun MongoEntryField<String>.contains(value: String, caseSensitive: Boolean = tru
   if (!caseSensitive) append("\$options", "i") // Case-insensitive
 })
 
+infix fun MongoEntryField<String>.matches(regex: String) = matches(regex, caseSensitive = true)
+infix fun MongoEntryField<String>.matchesCaseInsensitive(regex: String) = matches(regex, caseSensitive = false)
+
+fun MongoEntryField<String>.matches(regex: String, caseSensitive: Boolean = true) = FilterPair(this, Document().apply {
+  append("\$regex", regex)
+  if (!caseSensitive) append("\$options", "i")
+})
+
 // THIS CALL CAN NOT BE INDEXED!!!
 infix fun MongoEntryField<String>.startsWith(value: String) = startsWith(value, caseSensitive = true)
 
