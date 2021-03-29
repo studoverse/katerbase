@@ -36,7 +36,9 @@ open class MongoDatabase(
   allowReadFromSecondaries: Boolean = false,
   useMajorityWrite: Boolean = allowReadFromSecondaries,
   private val supportChangeStreams: Boolean = false,
-  autoManageCollectionsAndIndexes: Boolean = true,
+  autoCreateCollections: Boolean = true,
+  autoCreateIndexes: Boolean = true,
+  autoDeleteIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
 ) {
@@ -97,7 +99,7 @@ open class MongoDatabase(
       )
     } else emptyMap()
 
-    if (autoManageCollectionsAndIndexes) {
+    if (autoCreateCollections) {
       // Create collections which don't exist
       val newCollections = databaseDefinition.collections
         .filter { it.collectionName !in internalDatabase.listCollectionNames() }
@@ -117,11 +119,13 @@ open class MongoDatabase(
           println("Successfully created collection ${newCollection.collectionName}")
         }
       }
+    }
 
-      // Create and delete indexes in MongoDB
-      mongoCollections.forEach { (_, collection) ->
-        val existingIndexes = collection.internalCollection.listIndexes().toList().map { it["name"] as String }
+    // Create and delete indexes in MongoDB
+    mongoCollections.forEach { (_, collection) ->
+      val existingIndexes = collection.internalCollection.listIndexes().toList().map { it["name"] as String }
 
+      if (autoDeleteIndexes) {
         // Drop indexes which do not exist in the codebase anymore
         existingIndexes
           .filter { indexName -> indexName != "_id_" } // Never drop _id
@@ -132,10 +136,12 @@ open class MongoDatabase(
               println("Successfully dropped index $indexName")
             }
           }
+      }
 
-        // Make sure all indices are dropped first before creating new indexes so in case we change a textIndex we don't throw because
-        // only one text index per collection is allowed.
+      // Make sure all indices are dropped first before creating new indexes so in case we change a textIndex we don't throw because
+      // only one text index per collection is allowed.
 
+      if (autoCreateIndexes) {
         // Create new indexes which doesn't exist locally
         collection.indexes
           .filter { index -> index.indexName !in existingIndexes }
