@@ -8,10 +8,7 @@ import org.bson.Document
 import org.bson.conversions.Bson
 import java.util.*
 import java.util.regex.Pattern
-import kotlin.reflect.KClass
-import kotlin.reflect.KMutableProperty1
-import kotlin.reflect.KParameter
-import kotlin.reflect.KTypeParameter
+import kotlin.reflect.*
 
 abstract class MongoEntry {
   fun toBSONDocument(): Document = JsonHandler.toBsonDocument(this)
@@ -88,12 +85,12 @@ fun <Value> MongoEntryField<Value>.toMongoField() = MongoField(name)
 /**
  * Use this if you want to access a subdocument's field
  */
-fun <Class, Value> MongoEntryField<out Any>.child(property: KMutableProperty1<Class, Value>): MongoEntryField<Value> {
+fun <Class, Value> MongoEntryField<out Any>.child(property: KProperty1<Class, Value>): MongoEntryField<Value> {
   return this.toMongoField().extend(property.name).toProperty()
 }
 
 @JvmName("childOnNullable")
-fun <Class, Value> NullableMongoEntryField<out Any>.child(property: KMutableProperty1<Class, Value>): MongoEntryField<Value> {
+fun <Class, Value> NullableMongoEntryField<out Any>.child(property: KProperty1<Class, Value>): MongoEntryField<Value> {
   return this.toMongoField().extend(property.name).toProperty()
 }
 
