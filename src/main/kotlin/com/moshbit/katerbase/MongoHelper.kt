@@ -9,8 +9,8 @@ import org.bson.conversions.Bson
 import java.util.*
 import java.util.regex.Pattern
 import kotlin.reflect.KClass
-import kotlin.reflect.KMutableProperty1
 import kotlin.reflect.KParameter
+import kotlin.reflect.KProperty1
 import kotlin.reflect.KTypeParameter
 
 abstract class MongoEntry {
@@ -80,20 +80,20 @@ fun Array<out MongoPair>.toFilterDocument(): Document {
 
 class SubDocumentListFilter(vararg val filter: FilterPair)
 
-typealias MongoEntryField<T> = KMutableProperty1<out MongoEntry, T>
-typealias NullableMongoEntryField<T> = KMutableProperty1<out MongoEntry, T?>
+typealias MongoEntryField<T> = KProperty1<out MongoEntry, T>
+typealias NullableMongoEntryField<T> = KProperty1<out MongoEntry, T?>
 
 fun <Value> MongoEntryField<Value>.toMongoField() = MongoField(name)
 
 /**
  * Use this if you want to access a subdocument's field
  */
-fun <Class, Value> MongoEntryField<out Any>.child(property: KMutableProperty1<Class, Value>): MongoEntryField<Value> {
+fun <Value> MongoEntryField<out Any>.child(property: MongoEntryField<Value>): MongoEntryField<Value> {
   return this.toMongoField().extend(property.name).toProperty()
 }
 
 @JvmName("childOnNullable")
-fun <Class, Value> NullableMongoEntryField<out Any>.child(property: KMutableProperty1<Class, Value>): MongoEntryField<Value> {
+fun <Value> NullableMongoEntryField<out Any>.child(property: MongoEntryField<Value>): MongoEntryField<Value> {
   return this.toMongoField().extend(property.name).toProperty()
 }
 
@@ -121,7 +121,7 @@ fun MongoEntryField<out List<MongoSubEntry>>.none(vararg filter: FilterPair): Fi
 }
 
 // Represents a fake Kotlin class property
-private class FakeProperty<T, R>(override val name: String) : KMutableProperty1<T, R> {
+private class FakeProperty<T, R>(override val name: String) : KProperty1<T, R> {
   private fun error(): Nothing = throw Exception("Operation not supported")
 
   override fun invoke(p1: T): R = error()
@@ -141,22 +141,18 @@ private class FakeProperty<T, R>(override val name: String) : KMutableProperty1<
   override fun call(vararg args: Any?) = error()
   override val isConst get() = false
 
-  override val setter get() = error()
-
-  override fun getDelegate(receiver: T): Any? = error()
+  override fun getDelegate(receiver: T): Any = error()
   override val annotations: List<Annotation> get() = emptyList()
 
   override val getter get() = error()
   override fun get(receiver: T): R = error()
-  override fun set(receiver: T, value: R) = error()
-
 }
 
 class MongoField(val name: String) {
   fun extend(name: String) = MongoField(this.name + '.' + name)
   fun extendWithCursor(name: String) = MongoField(this.name + ".$." + name)
 
-  fun <Class, Type> toProperty(): KMutableProperty1<Class, Type> = FakeProperty(name)
+  fun <Class, Type> toProperty(): KProperty1<Class, Type> = FakeProperty(name)
   val fieldName: String get() = name.takeLastWhile { it != '.' }
 
   override fun equals(other: Any?): Boolean = (other as? MongoField)?.name == name
@@ -172,7 +168,7 @@ class FilterPair
 @Deprecated("Use only for hacks") constructor(key: MongoField, value: Any?) : MongoPair(key, value.toBSONDocument()) {
 
   @Suppress("DEPRECATION")
-  constructor(key: KMutableProperty1<out MongoEntry, out Any?>, value: Any?) : this(key.toMongoField(), value)
+  constructor(key: MongoEntryField<out Any?>, value: Any?) : this(key.toMongoField(), value)
 }
 
 class MutatorPair<out Value>
@@ -250,7 +246,7 @@ fun MongoEntryField<String>.endsWith(value: String, caseSensitive: Boolean = tru
   if (!caseSensitive) append("\$options", "i") // Case-insensitive
 })
 
-infix fun <Value> KMutableProperty1<out MongoEntry, out Collection<Value>>.has(value: Value) = FilterPair(this, value)
+infix fun <Value> MongoEntryField<out Collection<Value>>.has(value: Value) = FilterPair(this, value)
 
 infix fun <Value> MongoEntryField<Value>.inArray(array: Collection<Value>): FilterPair {
   return FilterPair(this, Document("\$in", array))
@@ -260,11 +256,11 @@ infix fun <Value> MongoEntryField<Value>.notInArray(array: Collection<Value>): F
   return FilterPair(this, Document("\$nin", array))
 }
 
-infix fun <Value> KMutableProperty1<out MongoEntry, out Collection<Value>>.hasAnyInArray(array: Collection<Value>) =
+infix fun <Value> MongoEntryField<out Collection<Value>>.hasAnyInArray(array: Collection<Value>) =
   FilterPair(this, Document("\$in", array))
 
-infix fun <Value> KMutableProperty1<out MongoEntry, out Collection<Value>>.hasNoneInArray(array: Collection<Value>) =
-    FilterPair(this, Document("\$nin", array))
+infix fun <Value> MongoEntryField<out Collection<Value>>.hasNoneInArray(array: Collection<Value>) =
+  FilterPair(this, Document("\$nin", array))
 
 infix fun <Value> MongoEntryField<Value>.lower(value: Value) = FilterPair(this, Document("\$lt", value))
 infix fun <Value> MongoEntryField<Value>.lowerEquals(value: Value) = FilterPair(this, Document("\$lte", value))
@@ -390,13 +386,13 @@ class AggregationPipeline {
     private val projections: MutableList<Bson> = mutableListOf()
     val bson: Bson get() = Projections.fields(projections)
 
-    fun include(field: KMutableProperty1<InputType, *>) {
+    fun include(field: KProperty1<InputType, *>) {
       projections += Projections.include(field.name)
     }
 
     // We can't use InputType for inputField here because inputFied can also be a child document type of a MongoMainEntry,
     // just ensure the field values have the same type
-    fun <FieldValueType> project(inputField: MongoEntryField<FieldValueType>, outputField: KMutableProperty1<OutputType, FieldValueType>) {
+    fun <FieldValueType> project(inputField: MongoEntryField<FieldValueType>, outputField: KProperty1<OutputType, FieldValueType>) {
       projections += Projections.computed(outputField.name, "\$${inputField.name}")
     }
   }

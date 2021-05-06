@@ -13,7 +13,6 @@ import com.mongodb.client.result.DeleteResult
 import com.mongodb.client.result.UpdateResult
 import org.bson.*
 import org.bson.conversions.Bson
-import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.reflect.KClass
@@ -302,7 +301,7 @@ open class MongoDatabase(
     fun getIndex(indexName: String): MongoIndex? = indexes.singleOrNull { it.indexName == indexName }
 
     // Used to create indexes for childFields
-    fun <Class, Value> MongoEntryField<out Any>.child(property: KMutableProperty1<Class, Value>): MongoEntryField<Value> {
+    fun <Value> MongoEntryField<out Any>.child(property: MongoEntryField<Value>): MongoEntryField<Value> {
       return this.toMongoField().extend(property.name).toProperty()
     }
 

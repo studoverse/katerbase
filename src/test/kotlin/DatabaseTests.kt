@@ -9,12 +9,11 @@ import java.util.*
 
 class DatabaseTests {
 
-  class EnumMongoPayload : MongoMainEntry() {
+  class EnumMongoPayload(val value1: Enum1 = Enum1.VALUE1) : MongoMainEntry() {
     enum class Enum1 {
       VALUE1, VALUE2, VALUE3
     }
 
-    var value1 = Enum1.VALUE1
     var enumList: List<Enum1> = emptyList()
     var enumSet: Set<Enum1> = emptySet()
     var date = Date()
@@ -176,7 +175,7 @@ class DatabaseTests {
       (1..500).forEach {
         val result = testDb.getCollection<EnumMongoPayload>().findOneOrInsert(EnumMongoPayload::_id equal id) {
           createNewCalls++
-          EnumMongoPayload().apply { this.value1 = value }
+          EnumMongoPayload(value1 = value)
         }
         assert(result._id == id)
         assert(result.value1 == value)
