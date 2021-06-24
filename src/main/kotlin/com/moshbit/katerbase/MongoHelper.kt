@@ -36,7 +36,7 @@ abstract class MongoMainEntry : MongoEntry() {
 
   companion object {
     private val random = Random()
-    private val secureRandom = SecureRandom.getInstanceStrong()
+    private val secureRandom = SecureRandom()
 
     fun randomId(): String {
       val bytes = ByteArray(size = 16) // 16 * 8 = 256 -> full entropy for sha256
