@@ -561,6 +561,7 @@ open class MongoDatabase(
       }
 
       fun randomId() = MongoMainEntry.randomId()
+      fun secureRandomId() = MongoMainEntry.secureRandomId()
 
       fun generateId(compoundValue: String, vararg compoundValues: String): String =
         MongoMainEntry.generateId(compoundValue, *compoundValues)
