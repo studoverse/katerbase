@@ -6,6 +6,7 @@ import com.mongodb.client.model.BsonField
 import com.mongodb.client.model.Projections
 import org.bson.Document
 import org.bson.conversions.Bson
+import java.security.SecureRandom
 import java.util.*
 import java.util.regex.Pattern
 import kotlin.reflect.KClass
@@ -29,15 +30,23 @@ abstract class MongoMainEntry : MongoEntry() {
   override fun hashCode(): Int = _id.hashCode()
 
   fun randomId(): String = MongoMainEntry.randomId()
+  fun secureRandomId(): String = MongoMainEntry.secureRandomId()
 
   fun generateId(compoundValue: String, vararg compoundValues: String): String = MongoMainEntry.generateId(compoundValue, *compoundValues)
 
   companion object {
     private val random = Random()
+    private val secureRandom = SecureRandom()
 
     fun randomId(): String {
       val bytes = ByteArray(size = 16) // 16 * 8 = 256 -> full entropy for sha256
       random.nextBytes(bytes)
+      return bytes.sha256().take(32)
+    }
+
+    fun secureRandomId(): String {
+      val bytes = ByteArray(size = 16) // 16 * 8 = 256 -> full entropy for sha256
+      secureRandom.nextBytes(bytes)
       return bytes.sha256().take(32)
     }
 
