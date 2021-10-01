@@ -7,6 +7,11 @@ import com.mongodb.client.DistinctIterable
 import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoIterable
 import com.mongodb.client.model.Sorts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flowOn
 import org.bson.BsonDocument
 import org.bson.BsonInt32
 import org.bson.Document
@@ -22,54 +27,58 @@ class AggregateCursor<Entry : Any>(val mongoIterable: AggregateIterable<Document
   override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
 }
 
-class FindCursor<Entry : MongoMainEntry>(
+abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindCursor<Entry, Cursor>>(
   val mongoIterable: FindIterable<Document>,
-  private val clazz: KClass<Entry>,
-  private val collection: MongoDatabase.MongoCollection<Entry>
-) : Iterable<Entry> {
-  override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
+  val clazz: KClass<Entry>,
+  val collection: MongoDatabase.MongoCollection<Entry>
+) {
+  protected var limit = 0
+  protected var skip = 0
+  protected var batchSize = 0
+  protected var projection = BsonDocument()
+  protected var sort: Bson? = null
+  protected var hint: Bson? = null
+  protected val mongoFilter by lazy { filterGetter.get(mongoIterable) as Bson }
 
-  private var limit = 0
-  private var skip = 0
-  private var batchSize = 0
-  private var projection = BsonDocument()
-  private var sort: Bson? = null
-  private var hint: Bson? = null
-  private val mongoFilter by lazy { filterGetter.get(mongoIterable) as Bson }
+  // Safe to do because Entry always stays the same.
+  // Needed for config functions (limit(), skip()...) to return `this` with the correct type and not AbstractFindCursor
+  @Suppress("UNCHECKED_CAST")
+  private val cursor: Cursor
+    get() = this as Cursor
 
   /* Limit number of returned objects */
-  fun limit(limit: Int): FindCursor<Entry> = apply {
+  fun limit(limit: Int): Cursor = cursor.apply {
     mongoIterable.limit(limit)
     this.limit = limit
   }
 
-  fun skip(skip: Int): FindCursor<Entry> = apply {
+  fun skip(skip: Int): Cursor = cursor.apply {
     mongoIterable.skip(skip)
     this.skip = skip
   }
 
-  fun batchSize(batchSize: Int): FindCursor<Entry> = apply {
+  fun batchSize(batchSize: Int): Cursor = cursor.apply {
     mongoIterable.batchSize(batchSize)
     this.batchSize = batchSize
   }
 
-  fun hint(indexName: String): FindCursor<Entry> =
+  fun hint(indexName: String): Cursor =
     hint(
       collection.getIndex(indexName)
         ?: throw IllegalArgumentException("Index $indexName was not found in collection ${collection.name}")
     )
 
-  fun hint(index: MongoDatabase.MongoCollection<Entry>.MongoIndex): FindCursor<Entry> = apply {
+  fun hint(index: MongoDatabase.MongoCollection<Entry>.MongoIndex): Cursor = cursor.apply {
     mongoIterable.hint(index.bson)
     this.hint = index.bson
   }
 
   @Deprecated("Use only for hacks")
-  fun projection(bson: Bson): FindCursor<Entry> = apply {
+  fun projection(bson: Bson): Cursor = cursor.apply {
     mongoIterable.projection(bson)
   }
 
-  fun <T> selectedFields(vararg fields: MongoEntryField<out T>): FindCursor<Entry> = apply {
+  fun <T> selectedFields(vararg fields: MongoEntryField<out T>): Cursor = cursor.apply {
     val bson = fields.includeBson()
     this.projection.combine(bson)
     mongoIterable.projection(this.projection)
@@ -79,26 +88,26 @@ class FindCursor<Entry : MongoMainEntry>(
     "Excluding fields is an anti-pattern and is not maintainable. Always use selected fields. " +
         "You can also structure your db-object into sub-objects so you only need to select one field."
   )
-  fun <T> excludeFields(vararg fields: MongoEntryField<out T>): FindCursor<Entry> = apply {
+  fun <T> excludeFields(vararg fields: MongoEntryField<out T>): Cursor = cursor.apply {
     val bson = fields.excludeBson()
     this.projection.combine(bson)
     mongoIterable.projection(this.projection)
   }
 
   @Deprecated("Use only for hacks")
-  fun sort(bson: Bson): FindCursor<Entry> = apply {
+  fun sort(bson: Bson): Cursor = cursor.apply {
     mongoIterable.sort(bson)
     this.sort = bson
   }
 
-  fun <T> sortByDescending(field: MongoEntryField<T>): FindCursor<Entry> = apply {
+  fun <T> sortByDescending(field: MongoEntryField<T>): Cursor = cursor.apply {
     val fieldName = field.toMongoField().name
     val bson = Sorts.descending(fieldName)
     mongoIterable.sort(bson)
     this.sort = bson
   }
 
-  fun <T> sortBy(field: MongoEntryField<T>): FindCursor<Entry> = apply {
+  fun <T> sortBy(field: MongoEntryField<T>): Cursor = cursor.apply {
     val fieldName = field.toMongoField().name
     val bson = Sorts.ascending(fieldName)
     mongoIterable.sort(bson)
@@ -109,7 +118,7 @@ class FindCursor<Entry : MongoMainEntry>(
     if (this === other) return true
     if (javaClass != other?.javaClass) return false
 
-    other as FindCursor<*>
+    other as AbstractFindCursor<*, *>
 
     if (clazz != other.clazz) return false
     if (limit != other.limit) return false
@@ -137,10 +146,28 @@ class FindCursor<Entry : MongoMainEntry>(
   }
 
   companion object {
-    val filterGetter = Class.forName("com.mongodb.client.internal.FindIterableImpl").declaredFields
+    private val filterGetter = Class.forName("com.mongodb.client.internal.FindIterableImpl").declaredFields
       .find { it.name == "filter" }!!
       .apply { isAccessible = true }
   }
+}
+
+class FindCursor<Entry : MongoMainEntry>(
+  mongoIterable: FindIterable<Document>,
+  clazz: KClass<Entry>,
+  collection: MongoDatabase.MongoCollection<Entry>
+) : AbstractFindCursor<Entry, FindCursor<Entry>>(mongoIterable, clazz, collection), Iterable<Entry> {
+  override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
+}
+
+class FlowFindCursor<Entry : MongoMainEntry>(
+  mongoIterable: FindIterable<Document>,
+  clazz: KClass<Entry>,
+  collection: MongoDatabase.MongoCollection<Entry>,
+) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(mongoIterable, clazz, collection),
+  Flow<Entry> by iteratorForDocumentClass(mongoIterable, clazz).asFlow().flowOn(Dispatchers.IO) {
+
+  suspend inline fun forEach(crossinline block: suspend (Entry) -> Unit) = collect(block)
 }
 
 private fun <Entry : Any> iteratorForDocumentClass(

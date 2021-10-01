@@ -14,9 +14,6 @@ import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import org.bson.*
 import org.bson.conversions.Bson
@@ -810,12 +807,9 @@ open class MongoDatabase(
       return runOnIo { mongoCollection.bulkWrite(options, action) }
     }
 
-    suspend fun find(vararg filter: FilterPair, cursorConfig: (FindCursor<Entry>.() -> Unit)? = null): Flow<Entry> {
-      return flow {
-        mongoCollection.find(*filter)
-          .apply { cursorConfig?.invoke(this) }
-          .forEach { entry -> emit(entry) }
-      }.flowOn(Dispatchers.IO)
+    suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
+      val cursor = withContext(Dispatchers.IO) { mongoCollection.find(*filter) }
+      return FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection)
     }
 
     suspend fun findOne(vararg filter: FilterPair): Entry? {

@@ -1,5 +1,4 @@
 import com.moshbit.katerbase.*
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
@@ -510,7 +509,7 @@ class DatabaseTests {
       }
       .onEach { collection.insertOne(it, upsert = false) }
 
-    collection.find().collect { payload ->
+    collection.find().forEach { payload ->
       assert(payloads.any { it._id == payload._id })
     }
   }
