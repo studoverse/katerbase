@@ -10,7 +10,14 @@ import com.mongodb.client.model.*
 import com.mongodb.client.model.changestream.FullDocument
 import com.mongodb.client.model.changestream.OperationType
 import com.mongodb.client.result.DeleteResult
+import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import org.bson.*
 import org.bson.conversions.Bson
 import java.util.concurrent.TimeUnit
@@ -54,6 +61,12 @@ open class MongoDatabase(
   }
 
   inline fun <reified T : MongoMainEntry> getCollection() = getCollection(entryClass = T::class)
+
+  open fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
+    return SuspendingMongoCollection(mongoCollection = getCollection(entryClass))
+  }
+
+  inline fun <reified T : MongoMainEntry> getSuspendingCollection() = getSuspendingCollection(entryClass = T::class)
 
   class DuplicateKeyException(key: String) : IllegalStateException("Duplicate key: $key was already in collection.")
 
@@ -173,9 +186,9 @@ open class MongoDatabase(
   )
 
   // Mongo collection wrapper for Kotlin
-  inner class MongoCollection<Entry : MongoMainEntry>(
+  open inner class MongoCollection<Entry : MongoMainEntry>(
     val internalCollection: com.mongodb.client.MongoCollection<Document>,
-    private val entryClass: KClass<Entry>,
+    val entryClass: KClass<Entry>,
     indexes: List<MongoDatabaseDefinition.Collection.Index>
   ) {
 
@@ -502,13 +515,13 @@ open class MongoDatabase(
       }
     }
 
-    // TODO when updating to mongo-java-driver 4.0 return an InsertOneResult instead of Unit
-    fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)) {
+    fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
       try {
-        internalCollection.insertOne(document.toBSONDocument())
+        return internalCollection.insertOne(document.toBSONDocument())
       } catch (e: MongoServerException) {
         if (e.code == 11000 && e.message?.matches(Regex(".*E11000 duplicate key error collection: .* index: _id_ dup key:.*")) == true) {
           onDuplicateKey.invoke()
+          return null
         } else {
           throw e // Every other exception than duplicate key
         }
@@ -765,6 +778,89 @@ open class MongoDatabase(
 
       val pipeline = getPipeline(winningPlan)
       return pipeline.joinToString(separator = " < ")
+    }
+  }
+
+  inner class SuspendingMongoCollection<Entry : MongoMainEntry>(
+    private val mongoCollection: MongoCollection<Entry>
+  ) {
+    private suspend fun <R> runOnIo(block: suspend CoroutineScope.() -> R): R {
+      return withContext(Dispatchers.IO, block)
+    }
+
+    val name: String get() = mongoCollection.name
+    val entryClass: KClass<Entry> get() = mongoCollection.entryClass
+
+    suspend fun drop() {
+      runOnIo { mongoCollection.drop() }
+    }
+
+    suspend fun clear(): DeleteResult {
+      return runOnIo { mongoCollection.clear() }
+    }
+
+    suspend fun count(vararg filter: FilterPair): Long {
+      return runOnIo { mongoCollection.count(*filter) }
+    }
+
+    suspend fun bulkWrite(
+      options: BulkWriteOptions = BulkWriteOptions(),
+      action: MongoCollection<Entry>.BulkOperation.() -> Unit
+    ): BulkWriteResult {
+      return runOnIo { mongoCollection.bulkWrite(options, action) }
+    }
+
+    suspend fun find(vararg filter: FilterPair, cursorConfig: (FindCursor<Entry>.() -> Unit)? = null): Flow<Entry> {
+      return flow {
+        mongoCollection.find(*filter)
+          .apply { cursorConfig?.invoke(this) }
+          .forEach { entry -> emit(entry) }
+      }.flowOn(Dispatchers.IO)
+    }
+
+    suspend fun findOne(vararg filter: FilterPair): Entry? {
+      return runOnIo { mongoCollection.findOne(*filter) }
+    }
+
+    suspend fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
+      return runOnIo { mongoCollection.findOneOrInsert(*filter, newEntry = newEntry) }
+    }
+
+    suspend fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+      return runOnIo { mongoCollection.updateOne(*filter, update = update) }
+    }
+
+    suspend fun updateOneOrInsert(filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+      return runOnIo { mongoCollection.updateOneOrInsert(filter, update = update) }
+    }
+
+    suspend fun updateOneAndFind(
+      vararg filter: FilterPair,
+      upsert: Boolean = false,
+      returnDocument: ReturnDocument = ReturnDocument.AFTER,
+      update: MongoCollection<Entry>.UpdateOperation.() -> Unit
+    ): Entry? {
+      return runOnIo { mongoCollection.updateOneAndFind(*filter, upsert = upsert, returnDocument = returnDocument, update = update) }
+    }
+
+    suspend fun updateMany(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+      return runOnIo { mongoCollection.updateMany(*filter, update = update) }
+    }
+
+    suspend fun insertOne(document: Entry, upsert: Boolean) {
+      return runOnIo { mongoCollection.insertOne(document, upsert) }
+    }
+
+    suspend fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
+      return runOnIo { mongoCollection.insertOne(document, onDuplicateKey) }
+    }
+
+    suspend fun deleteOne(vararg filter: FilterPair): DeleteResult {
+      return runOnIo { mongoCollection.deleteOne(*filter) }
+    }
+
+    suspend fun deleteMany(vararg filter: FilterPair): DeleteResult {
+      return runOnIo { mongoCollection.deleteMany(*filter) }
     }
   }
 

@@ -1,4 +1,6 @@
 import com.moshbit.katerbase.*
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
@@ -493,6 +495,24 @@ class DatabaseTests {
 
     returnVal = collection.findOneOrInsert(EnumMongoPayload::_id equal "findOneOrInsertTest", newEntry = { payload })
     assertEquals(payload.long + 1, returnVal.long)
+  }
+
+  @Test
+  fun suspendingFindTest() = runBlocking {
+    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
+
+    val payloads = (1..50)
+      .map {
+        EnumMongoPayload().apply {
+          _id = randomId()
+          long = it.toLong()
+        }
+      }
+      .onEach { collection.insertOne(it, upsert = false) }
+
+    collection.find().collect { payload ->
+      assert(payloads.any { it._id == payload._id })
+    }
   }
 
   companion object {
