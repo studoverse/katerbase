@@ -808,8 +808,10 @@ open class MongoDatabase(
     }
 
     suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
-      val cursor = withContext(Dispatchers.IO) { mongoCollection.find(*filter) }
-      return FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection)
+      return withContext(Dispatchers.IO) {
+        val cursor = mongoCollection.find(*filter)
+        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection)
+      }
     }
 
     suspend fun findOne(vararg filter: FilterPair): Entry? {

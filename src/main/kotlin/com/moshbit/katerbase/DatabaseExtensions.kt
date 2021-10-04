@@ -8,10 +8,7 @@ import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoIterable
 import com.mongodb.client.model.Sorts
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.*
 import org.bson.BsonDocument
 import org.bson.BsonInt32
 import org.bson.Document
@@ -165,33 +162,43 @@ class FlowFindCursor<Entry : MongoMainEntry>(
   clazz: KClass<Entry>,
   collection: MongoDatabase.MongoCollection<Entry>,
 ) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(mongoIterable, clazz, collection),
-  Flow<Entry> by iteratorForDocumentClass(mongoIterable, clazz).asFlow().flowOn(Dispatchers.IO) {
+  Flow<Entry> by flowForDocumentClass(mongoIterable, clazz) {
 
+  @Deprecated("Flow analogue of 'forEach' is 'collect'", replaceWith = ReplaceWith("collect(block)"))
   suspend inline fun forEach(crossinline block: suspend (Entry) -> Unit) = collect(block)
 }
+
+private fun <Entry : Any> flowForDocumentClass(
+  mongoIterable: MongoIterable<out Document>,
+  clazz: KClass<Entry>
+): Flow<Entry> = mongoIterable.iterator()
+  .asFlow()
+  .map { document -> deserialize(document, clazz) }
+  .flowOn(Dispatchers.IO)
 
 private fun <Entry : Any> iteratorForDocumentClass(
   mongoIterable: MongoIterable<out Document>,
   clazz: KClass<Entry>
 ): Iterator<Entry> = object : Iterator<Entry> {
-  val mongoIterator = mongoIterable.iterator()
+  private val mongoIterator = mongoIterable.iterator()
 
   override fun hasNext(): Boolean = mongoIterator.hasNext()
 
-  override fun next(): Entry {
-    val document = mongoIterator.next()
-    return try {
-      JsonHandler.fromBson(document, clazz)
-    } catch (e: JsonProcessingException) {
-      throw IllegalArgumentException("Could not deserialize mongo entry of type ${clazz.simpleName} with id ${document["_id"]}", e)
-    } catch (e: MongoCursorNotFoundException) {
-      throw IOException(
-        "Cursor was not (any more) found. " +
-            "In case iterating over a large result and doing longer operations in the iteration, " +
-            "consider using .batchSize() to not timeout the MongoCursor. " +
-            "See https://docs.mongodb.com/manual/tutorial/iterate-a-cursor/#cursor-batches", e
-      )
-    }
+  override fun next(): Entry = deserialize(mongoIterator.next(), clazz)
+}
+
+private fun <Entry : Any> deserialize(document: Document, clazz: KClass<Entry>): Entry {
+  return try {
+    JsonHandler.fromBson(document, clazz)
+  } catch (e: JsonProcessingException) {
+    throw IllegalArgumentException("Could not deserialize mongo entry of type ${clazz.simpleName} with id ${document["_id"]}", e)
+  } catch (e: MongoCursorNotFoundException) {
+    throw IOException(
+      "Cursor was not (any more) found. " +
+          "In case iterating over a large result and doing longer operations in the iteration, " +
+          "consider using .batchSize() to not timeout the MongoCursor. " +
+          "See https://docs.mongodb.com/manual/tutorial/iterate-a-cursor/#cursor-batches", e
+    )
   }
 }
 
