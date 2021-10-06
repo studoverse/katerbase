@@ -14,6 +14,8 @@ import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.bson.*
 import org.bson.conversions.Bson
@@ -235,7 +237,7 @@ open class MongoDatabase(
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
 
-      thread {
+      thread(isDaemon = true) {
         try {
           internalCollection.watch(listOf(pipeline))
             .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
@@ -788,6 +790,16 @@ open class MongoDatabase(
     val name: String get() = mongoCollection.name
     val entryClass: KClass<Entry> get() = mongoCollection.entryClass
 
+    fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), changeBufferCapacity: Int = 64): Channel<PayloadChange<Entry>> {
+      val channel = Channel<PayloadChange<Entry>>(changeBufferCapacity)
+
+      mongoCollection.watch(ignoredFields) { change ->
+        runBlocking { channel.send(change) }
+      }
+
+      return channel
+    }
+
     suspend fun drop() {
       runOnIo { mongoCollection.drop() }
     }
@@ -805,6 +817,24 @@ open class MongoDatabase(
       action: MongoCollection<Entry>.BulkOperation.() -> Unit
     ): BulkWriteResult {
       return runOnIo { mongoCollection.bulkWrite(options, action) }
+    }
+
+    suspend fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): FlowAggregateCursor<T> {
+      return runOnIo { FlowAggregateCursor(mongoCollection.aggregate(pipeline, entryClass)) }
+    }
+
+    suspend inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): FlowAggregateCursor<T> {
+      return aggregate(
+        pipeline = aggregationPipeline(pipeline),
+        entryClass = T::class
+      )
+    }
+
+    suspend fun sample(size: Int): FlowAggregateCursor<Entry> {
+      return aggregate(
+        pipeline = aggregationPipeline { sample(size) },
+        entryClass = entryClass
+      )
     }
 
     suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
