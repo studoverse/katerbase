@@ -199,7 +199,11 @@ private fun <Entry : Any> deserialize(document: Document, clazz: KClass<Entry>):
   return try {
     JsonHandler.fromBson(document, clazz)
   } catch (e: JsonProcessingException) {
-    throw IllegalArgumentException("Could not deserialize mongo entry of type ${clazz.simpleName} with id ${document["_id"]}", e)
+    throw IllegalArgumentException(
+      "Could not deserialize mongo entry of type ${clazz.simpleName} with id ${document["_id"]}. " +
+          "This can be due to a schema conflict between database and the application. " +
+          "Or in case of missing value a selectedFields()/excludeFields() statement that excludes then required values.", e
+    )
   } catch (e: MongoCursorNotFoundException) {
     throw IOException(
       "Cursor was not (any more) found. " +
