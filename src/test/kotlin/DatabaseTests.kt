@@ -17,6 +17,8 @@ class DatabaseTests {
 
     var enumList: List<Enum1> = emptyList()
     var enumSet: Set<Enum1> = emptySet()
+    var enumMap1: Map<Enum1, Int> = emptyMap()
+    var enumMap2: Map<Enum1, Enum1> = emptyMap()
     var date = Date()
     var long = 0L
     var stringList: List<String> = emptyList()
@@ -235,7 +237,7 @@ class DatabaseTests {
     val payload = EnumMongoPayload()
     val bson = payload.toBSONDocument()
     assert(bson["computedProp"] == null)
-    assertEquals(12, bson.size)
+    assertEquals(14, bson.size)
   }
 /*
   @Test
@@ -511,6 +513,36 @@ class DatabaseTests {
 
     collection.find().forEach { payload ->
       assert(payloads.any { it._id == payload._id })
+    }
+  }
+
+  @Test
+  fun enumMaps() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+    val id = "enumMaps"
+
+    // Insert payload
+    val insertPayload = EnumMongoPayload().apply {
+      _id = id
+      enumMap1 = mapOf(EnumMongoPayload.Enum1.VALUE2 to 2)
+      enumMap2 = mapOf(EnumMongoPayload.Enum1.VALUE3 to EnumMongoPayload.Enum1.VALUE2)
+    }
+    collection.insertOne(insertPayload, upsert = false)
+
+    collection.findOne(EnumMongoPayload::_id equal id)!!.apply {
+      assertEquals(insertPayload.enumMap1, enumMap1)
+      assertEquals(insertPayload.enumMap2, enumMap2)
+    }
+
+    // Change fields
+    collection.updateOne(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::enumMap1 setTo mapOf(EnumMongoPayload.Enum1.VALUE1 to 1)
+      EnumMongoPayload::enumMap2 setTo mapOf(EnumMongoPayload.Enum1.VALUE2 to EnumMongoPayload.Enum1.VALUE3)
+    }
+
+    collection.findOne(EnumMongoPayload::_id equal id)!!.apply {
+      assertEquals(mapOf(EnumMongoPayload.Enum1.VALUE1 to 1), enumMap1)
+      assertEquals(mapOf(EnumMongoPayload.Enum1.VALUE2 to EnumMongoPayload.Enum1.VALUE3), enumMap2)
     }
   }
 
