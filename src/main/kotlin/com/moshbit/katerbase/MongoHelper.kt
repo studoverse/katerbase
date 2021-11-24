@@ -63,7 +63,7 @@ private fun Any?.toBSONDocument(): Any? = when (this) {
   is Enum<*> -> this.name
   is Collection<*> -> this.map { it.toBSONDocument() }
   is Document -> this.map { (key, value) -> (key as String) to value.toBSONDocument() }.toMap(Document())
-  is Map<*, *> -> this.map { (key, value) -> (key as String) to value.toBSONDocument() }.toMap(Document())
+  is Map<*, *> -> this.map { (key, value) -> (key.toBSONDocument() as String) to value.toBSONDocument() }.toMap(Document())
   is MongoEntry -> this.toBSONDocument()
   is SubDocumentListFilter -> Document("\$elemMatch", filter.toFilterDocument())
   else -> throw IllegalArgumentException("${this.javaClass.simpleName} is not BSON compatible, if you want to put this class in Mongo it should be a MongoEntry!")
