@@ -782,10 +782,8 @@ open class MongoDatabase(
       }
 
       return QueryStats(
-        executionPipeline = getPipeline(winningPlan),
-        executionSuccess = executionStats["executionSuccess"] as Boolean,
-        returnedDocumentCount = executionStats["nReturned"] as Int,
-        executionTimeMillis = executionStats["executionTimeMillis"] as Int,
+        winningPlan = getPipeline(winningPlan),
+        executionStatsRaw = executionStats,
       )
     }
   }

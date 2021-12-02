@@ -409,9 +409,10 @@ class AggregationPipeline {
 
 class QueryStats(
   val winningPlan: List<String>,
-  val executionSuccess: Boolean,
-  val returnedDocuments: Int,
-  val executionTimeMillis: Int,
+  val executionStatsRaw: Document,
 ) {
-  val executionPipelineString get() = executionPipeline.joinToString(separator = " < ")
+  val executionPipelineString get() = winningPlan.joinToString(separator = " < ")
+  val executionSuccess get() = executionStatsRaw["executionSuccess"] as Boolean
+  val returnedDocuments get() = executionStatsRaw["nReturned"] as Int
+  val executionTimeMillis get() = executionStatsRaw["executionTimeMillis"] as Int
 }
