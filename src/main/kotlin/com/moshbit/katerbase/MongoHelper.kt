@@ -408,7 +408,7 @@ class AggregationPipeline {
 }
 
 class QueryStats(
-  val executionPipeline: List<String>,
+  val winningPlan: List<String>,
   val executionSuccess: Boolean,
   val returnedDocumentCount: Int,
   val executionTimeMillis: Int,
