@@ -406,3 +406,13 @@ class AggregationPipeline {
     }
   }
 }
+
+class QueryStats(
+  val winningPlan: List<String>,
+  val executionStatsRaw: Document,
+) {
+  val executionPipelineString get() = winningPlan.joinToString(separator = " < ")
+  val executionSuccess get() = executionStatsRaw["executionSuccess"] as Boolean
+  val returnedDocuments get() = executionStatsRaw["nReturned"] as Int
+  val executionTimeMillis get() = executionStatsRaw["executionTimeMillis"] as Int
+}

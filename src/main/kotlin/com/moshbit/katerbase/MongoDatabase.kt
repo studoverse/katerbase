@@ -760,23 +760,31 @@ open class MongoDatabase(
       }
     }
 
-    fun Array<out FilterPair>.getExecutionPipeline(): String {
+    private fun Array<out FilterPair>.getExecutionPipeline(): String = getQueryStats(filter = this).executionPipelineString
+
+    fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
       val explainCommand = Document().apply {
         put("explain", Document().apply {
           put("find", name)
-          put("filter", this@getExecutionPipeline.toFilterDocument())
+          put("filter", filter.toFilterDocument())
+          if (limit != null) put("limit", limit)
         })
-        put("verbosity", "queryPlanner")
+        put("verbosity", "executionStats")
       }
       val res = internalDatabase.runCommand(explainCommand)
+      val executionStats = res.getValue("executionStats") as Document
+
       val winningPlan = (res.getValue("queryPlanner") as Document).getValue("winningPlan") as Document
       fun getPipeline(stage: Document): List<String> {
-        return listOf(stage.getValue("stage") as String) + ((stage["inputStage"] as? Document)?.let { inputStage -> getPipeline(inputStage) }
-          ?: emptyList())
+        val currentStagePipeline = listOf(stage.getValue("stage") as String)
+        val inputStage = stage["inputStage"] as? Document ?: return currentStagePipeline // No more stages, so just return current stage
+        return currentStagePipeline + getPipeline(inputStage)
       }
 
-      val pipeline = getPipeline(winningPlan)
-      return pipeline.joinToString(separator = " < ")
+      return QueryStats(
+        winningPlan = getPipeline(winningPlan),
+        executionStatsRaw = executionStats,
+      )
     }
   }
 
