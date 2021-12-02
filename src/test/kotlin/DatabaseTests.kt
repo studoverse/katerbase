@@ -546,6 +546,20 @@ class DatabaseTests {
     }
   }
 
+  @Test
+  fun queryStats() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+
+    (1..100)
+      .map { EnumMongoPayload().apply { _id = randomId() } }
+      .forEach { collection.insertOne(it, upsert = false) }
+
+    val stats = collection.getQueryStats()
+
+    assertEquals(true, stats.executionSuccess)
+    assertEquals(100, stats.returnedDocumentCount)
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 

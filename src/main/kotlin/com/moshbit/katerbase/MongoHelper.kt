@@ -406,3 +406,12 @@ class AggregationPipeline {
     }
   }
 }
+
+class QueryStats(
+  val executionPipeline: List<String>,
+  val executionSuccess: Boolean,
+  val returnedDocumentCount: Int,
+  val executionTimeMillis: Int,
+) {
+  val executionPipelineString get() = executionPipeline.joinToString(separator = " < ")
+}
