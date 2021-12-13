@@ -69,6 +69,11 @@ open class MongoDatabase(
 
   class DuplicateKeyException(key: String) : IllegalStateException("Duplicate key: $key was already in collection.")
 
+  fun getDatabaseStats(): DatabaseStats {
+    val commandResult = internalDatabase.runCommand(Document(mapOf("dbStats" to 1, "scale" to 1)))
+    return JsonHandler.fromBson(commandResult, DatabaseStats::class)
+  }
+
   init {
     // Disable mongo driver logging
     setLogLevel("org.mongodb", Level.ERROR)
