@@ -557,7 +557,13 @@ class DatabaseTests {
     val stats = collection.getQueryStats()
 
     assertEquals(true, stats.executionSuccess)
-    assertEquals(100, stats.returnedDocumentCount)
+    assertEquals(100, stats.returnedDocuments)
+  }
+
+  @Test
+  fun dbStats() {
+    val stats = testDb.getDatabaseStats()
+    assert(stats.collections > 0)
   }
 
   companion object {

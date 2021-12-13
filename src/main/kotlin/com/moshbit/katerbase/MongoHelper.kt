@@ -407,6 +407,21 @@ class AggregationPipeline {
   }
 }
 
+// Size is always in bytes
+// More info: https://docs.mongodb.com/manual/reference/command/dbStats/#output
+class DatabaseStats(
+  val db: String,
+  val collections: Int,
+  val views: Int,
+  val objects: Int,
+  val avgObjSize: Double,
+  val dataSize: Double,
+  val storageSize: Double,
+  val indexes: Int,
+  val indexSize: Double,
+  val fsUsedSize: Double,
+)
+
 class QueryStats(
   val winningPlan: List<String>,
   val executionStatsRaw: Document,
