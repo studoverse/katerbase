@@ -8,7 +8,10 @@ import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoIterable
 import com.mongodb.client.model.Sorts
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import org.bson.BsonDocument
 import org.bson.BsonInt32
 import org.bson.Document
@@ -173,7 +176,7 @@ class FlowFindCursor<Entry : MongoMainEntry>(
   Flow<Entry> by flowForDocumentClass(mongoIterable, clazz) {
 
   @Deprecated("Flow analogue of 'forEach' is 'collect'", replaceWith = ReplaceWith("collect(block)"))
-  suspend inline fun forEach(crossinline block: suspend (Entry) -> Unit) = collect(block)
+  suspend inline fun forEach(noinline block: (Entry) -> Unit) = collect(block)
 }
 
 private fun <Entry : Any> flowForDocumentClass(
