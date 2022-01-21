@@ -17,7 +17,7 @@ dependencies {
 
   implementation("org.mongodb:mongodb-driver-sync:4.1.0")
 
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.2")
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0")
 
   implementation("com.fasterxml.jackson.core:jackson-core:2.11.2")
   implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.11.2")
