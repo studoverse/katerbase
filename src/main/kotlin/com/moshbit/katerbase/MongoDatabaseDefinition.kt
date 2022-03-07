@@ -2,6 +2,7 @@ package com.moshbit.katerbase
 
 import com.mongodb.client.model.IndexOptions
 import com.mongodb.client.model.Indexes
+import org.bson.Document
 import org.bson.conversions.Bson
 import kotlin.reflect.KClass
 
@@ -12,7 +13,28 @@ class MongoDatabaseDefinition {
     val collectionName: String,
     val collectionSizeCap: Long?
   ) {
-    class Index(val index: Bson, val partialIndex: Array<FilterPair>?, val indexOptions: (IndexOptions.() -> Unit)?)
+    class Index(val index: Bson, val partialIndex: Array<FilterPair>?, val indexOptions: (IndexOptions.() -> Unit)?) {
+      init {
+        partialIndex?.forEach { filterPair ->
+          (filterPair.value as? Document)?.entries?.forEach { (operator: String, value: Any) ->
+            // Not all operators are allowed for partial indexes, see https://docs.mongodb.com/manual/core/index-partial/#create-a-partial-index
+            when {
+              operator in allowedPartialIndexQueryOperators -> Unit
+              operator == "\$exists" && value == true -> {
+                // $exists operator only allowed with value true
+              }
+              else -> throw IllegalArgumentException(
+                "$operator cannot be used for partial indexes, see https://docs.mongodb.com/manual/core/index-partial/#create-a-partial-index"
+              )
+            }
+          }
+        }
+      }
+
+      companion object {
+        private val allowedPartialIndexQueryOperators = setOf("\$gt", "\$gte", "\$lt", "\$lte", "\$eq", "\$type")
+      }
+    }
 
     val indexes = mutableListOf<Index>()
 

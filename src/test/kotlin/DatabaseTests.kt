@@ -566,6 +566,42 @@ class DatabaseTests {
     assert(stats.collections > 0)
   }
 
+  @Test
+  fun indexOperatorCheck() {
+    with(MongoDatabaseDefinition.Collection(EnumMongoPayload::class, "enumColl", collectionSizeCap = null)) {
+      index(
+        EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
+          EnumMongoPayload::double greater 0
+        )
+      )
+      index(
+        EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
+          EnumMongoPayload::double equal 0
+        )
+      )
+      index(
+        EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
+          EnumMongoPayload::double exists true
+        )
+      )
+
+      assertThrows(IllegalArgumentException::class.java) {
+        index(
+          EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
+            EnumMongoPayload::double notEqual 0
+          )
+        )
+      }
+      assertThrows(IllegalArgumentException::class.java) {
+        index(
+          EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
+            EnumMongoPayload::double exists false
+          )
+        )
+      }
+    }
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 
