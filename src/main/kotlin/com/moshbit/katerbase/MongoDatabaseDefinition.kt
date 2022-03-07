@@ -19,7 +19,7 @@ class MongoDatabaseDefinition {
           (filterPair.value as? Document)?.entries?.forEach { (operator: String, value: Any) ->
             // Not all operators are allowed for partial indexes, see https://docs.mongodb.com/manual/core/index-partial/#create-a-partial-index
             when {
-              operator.removePrefix("$") in allowedPartialIndexQueryOperators -> Unit
+              operator in allowedPartialIndexQueryOperators -> Unit
               operator == "\$exists" && value == true -> {
                 // $exists operator only allowed with value true
               }
@@ -32,7 +32,7 @@ class MongoDatabaseDefinition {
       }
 
       companion object {
-        private val allowedPartialIndexQueryOperators = setOf("gt", "gte", "lt", "lte", "eq", "type")
+        private val allowedPartialIndexQueryOperators = setOf("\$gt", "\$gte", "\$lt", "\$lte", "\$eq", "\$type")
       }
     }
 
