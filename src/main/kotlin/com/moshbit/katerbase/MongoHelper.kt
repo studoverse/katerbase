@@ -357,6 +357,10 @@ class AggregationPipeline {
     bson += Aggregates.sort(Document(field.name, -1))
   }
 
+  fun limit(limit: Int) {
+    bson += Aggregates.limit(limit)
+  }
+
   class Accumulation {
     val accumulators: MutableList<Accumulator> = mutableListOf()
 
