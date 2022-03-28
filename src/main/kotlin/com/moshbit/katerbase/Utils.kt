@@ -23,7 +23,7 @@ internal fun String.sha256(): String {
 }
 
 internal fun Date.toIsoString(): String {
-  return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX", Locale.GERMANY)
+  return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX")
     .apply { timeZone = TimeZone.getTimeZone("UTC") }
     .format(this)
 }
