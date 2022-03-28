@@ -307,8 +307,10 @@ open class MongoDatabase(
 
         val partialSuffix = partialIndex
           ?.map { (key, value) ->
-            value as Document
-            PartialIndexFilter(fieldName = key, operator = value.entries.first().key, value = value.entries.first().value)
+            when (value) {
+              is Document -> PartialIndexFilter(fieldName = key, operator = value.entries.first().key, value = value.entries.first().value)
+              else -> PartialIndexFilter(fieldName = key, operator = "\$eq", value = value)
+            }
           }
           ?.joinToString(separator = "_", transform = { it.toString() })
           ?.let { suffix -> "_$suffix" } ?: ""
