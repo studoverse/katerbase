@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.bson.*
 import org.bson.conversions.Bson
+import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.reflect.KClass
@@ -283,6 +284,15 @@ open class MongoDatabase(
       val indexOptions: (IndexOptions.() -> Unit)? = indexDefinition.indexOptions
       val indexName: String
 
+      private inner class PartialIndexFilter(val fieldName: String, val operator: String, val value: Any) {
+        val valueAsString: String = when (value) {
+          is Date -> value.toIsoString()
+          else -> value.toString()
+        }
+
+        override fun toString(): String = "$fieldName->{$operator:$valueAsString}"
+      }
+
       init {
         fun BsonValue.toIndexValue() = when (this) {
           is BsonNumber -> this.intValue()
@@ -296,8 +306,11 @@ open class MongoDatabase(
           .joinToString(separator = "_", transform = { "${it.first}_${it.second.toIndexValue()}" })
 
         val partialSuffix = partialIndex
-          ?.map { (key, value) -> key to value }
-          ?.joinToString(separator = "_", transform = { (operator, value) -> "${operator}_$value" })
+          ?.map { (key, value) ->
+            value as Document
+            PartialIndexFilter(fieldName = key, operator = value.entries.first().key, value = value.entries.first().value)
+          }
+          ?.joinToString(separator = "_", transform = { it.toString() })
           ?.let { suffix -> "_$suffix" } ?: ""
 
         indexName = baseName + partialSuffix
