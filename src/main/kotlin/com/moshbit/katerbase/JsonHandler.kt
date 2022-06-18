@@ -5,13 +5,15 @@ import com.fasterxml.jackson.annotation.PropertyAccessor
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.core.Version
+import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.databind.*
+import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.databind.module.SimpleModule
 import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.databind.node.POJONode
 import com.fasterxml.jackson.databind.node.TextNode
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.fasterxml.jackson.module.kotlin.KotlinModule
 import org.bson.Document
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
@@ -26,8 +28,14 @@ import kotlin.reflect.full.isSubtypeOf
 import kotlin.reflect.jvm.kotlinProperty
 
 object JsonHandler {
-  private val mongoJacksonMapper: ObjectMapper = ObjectMapper()
-    .registerModule(
+  private val mongoJacksonMapper: ObjectMapper = JsonMapper.builder()
+    .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES) // Don't fail when JSON has new/additional values
+    .enable(MapperFeature.PROPAGATE_TRANSIENT_MARKER) // Jackson doesn't ignore Transient members, so make it ignore them
+    .enable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+    .enable(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL) // This is used to handle db migration of enum values softly
+    .enable(JsonReadFeature.ALLOW_NON_NUMERIC_NUMBERS) // Used for Double.INFINITY
+    .addModule(KotlinModule())
+    .addModule(
       SimpleModule(
         /* name = */ "MongoWrapperModule",
         /* version = */ Version.unknownVersion(),
@@ -38,13 +46,9 @@ object JsonHandler {
         /* serializers = */ listOf(MongoDateSerializer())
       )
     )
-    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false) // Don't fail when JSON has new/additional values
-    .configure(MapperFeature.PROPAGATE_TRANSIENT_MARKER, true) // Jackson doesn't ignore Transient members, so make it ignore them
-    .configure(DeserializationFeature.ACCEPT_FLOAT_AS_INT, true)
-    .configure(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL, true) // This is used to handle db migration of enum values softly
-    .setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE) // Ignore all computed properties and functions
-    .setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)
-    .registerKotlinModule()
+    .visibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE) // Ignore all computed properties and functions
+    .visibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)
+    .build()
 
   fun <T : Any> ObjectMapper.constructCollectionType(kClass: KClass<T>) =
     typeFactory.constructCollectionType(List::class.java, kClass.java)

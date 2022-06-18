@@ -511,7 +511,7 @@ class DatabaseTests {
       }
       .onEach { collection.insertOne(it, upsert = false) }
 
-    collection.find().forEach { payload ->
+    collection.find().collect { payload ->
       assert(payloads.any { it._id == payload._id })
     }
   }
