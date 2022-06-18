@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.util.*
 
-@TestMethodOrder(MethodOrderer.Alphanumeric::class)
+@TestMethodOrder(MethodOrderer.MethodName::class)
 class MoviesExample {
 
   class Movie : MongoMainEntry() {

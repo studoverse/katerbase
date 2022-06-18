@@ -223,7 +223,6 @@ open class MongoDatabase(
 
               // Get all the fields where we should listen for changes
               val nonIgnoredMongoFields = entryClass.memberProperties
-                .mapNotNull { it as? MongoEntryField<*> }
                 .map { it.toMongoField() }
                 .filter { it !in ignoredMongoFields }
 
@@ -352,7 +351,10 @@ open class MongoDatabase(
 
     fun bulkWrite(options: BulkWriteOptions = BulkWriteOptions(), action: BulkOperation.() -> Unit): BulkWriteResult {
       val models = BulkOperation().apply { action(this) }.models
-      if (models.isEmpty()) return BulkWriteResult.acknowledged(0, 0, 0, 0, emptyList()) // Acknowledge empty bulk write
+      if (models.isEmpty()) {
+        // Acknowledge empty bulk write
+        return BulkWriteResult.acknowledged(0, 0, 0, 0, emptyList(), emptyList())
+      }
       return internalCollection.bulkWrite(models, options)
     }
 
@@ -375,8 +377,8 @@ open class MongoDatabase(
     fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T> {
       return AggregateCursor(
         mongoIterable = internalCollection.aggregate(
-          /*pipeline = */ pipeline.bson,
-          /*resultClass = */ Document::class.java
+          /* pipeline = */ pipeline.bson,
+          /* resultClass = */ Document::class.java
         ),
         clazz = entryClass
       )
@@ -431,20 +433,12 @@ open class MongoDatabase(
     fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
       return DistinctCursor(
         mongoIterable = internalCollection.distinct(
-          /*fieldName = */ distinctField.name,
-          /*filter = */ filter.toFilterDocument(),
-          /*resultClass = */ entryClass.java
+          /* fieldName = */ distinctField.name,
+          /* filter = */ filter.toFilterDocument(),
+          /* resultClass = */ entryClass.java
         ),
         clazz = entryClass
       )
-    }
-
-    // TODO Replace calls with `distinct` when https://youtrack.jetbrains.com/issue/KT-35105 is fixed
-    inline fun <reified T : Any> distinct_mitigateCompilerBug(
-      distinctField: MongoEntryField<T>,
-      vararg filter: FilterPair
-    ): DistinctCursor<T> {
-      return distinct(distinctField, T::class, *filter)
     }
 
     inline fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T> {
@@ -518,10 +512,9 @@ open class MongoDatabase(
       return internalCollection.updateMany(filter.toFilterDocument(), mutator)
     }
 
-    // TODO when updating to mongo-java-driver 4.0 return an InsertOneResult instead of Unit
     /** Throws on duplicate key when upsert=false */
-    fun insertOne(document: Entry, upsert: Boolean) {
-      if (upsert) {
+    fun insertOne(document: Entry, upsert: Boolean): Any /* InsertOneResult | UpdateResult */ {
+      return if (upsert) {
         retryMongoOperationOnDuplicateKeyError {
           internalCollection.replaceOne(
             Document().apply { put("_id", document._id) },
@@ -530,7 +523,7 @@ open class MongoDatabase(
           )
         }
       } else {
-        insertOne(document, onDuplicateKey = { throw DuplicateKeyException(key = document._id) })
+        insertOne(document, onDuplicateKey = { throw DuplicateKeyException(key = document._id) })!!
       }
     }
 
