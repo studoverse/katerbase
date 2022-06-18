@@ -34,7 +34,7 @@ object JsonHandler {
     .enable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
     .enable(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL) // This is used to handle db migration of enum values softly
     .enable(JsonReadFeature.ALLOW_NON_NUMERIC_NUMBERS) // Used for Double.INFINITY
-    .addModule(KotlinModule())
+    .addModule(KotlinModule.Builder().build())
     .addModule(
       SimpleModule(
         /* name = */ "MongoWrapperModule",

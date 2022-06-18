@@ -15,18 +15,18 @@ repositories {
 dependencies {
   implementation(kotlin("stdlib-jdk8"))
 
-  implementation("org.mongodb:mongodb-driver-sync:4.1.0")
+  implementation("org.mongodb:mongodb-driver-sync:4.6.0")
 
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0")
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.2")
 
-  implementation("com.fasterxml.jackson.core:jackson-core:2.11.2")
-  implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.11.2")
+  implementation("com.fasterxml.jackson.core:jackson-core:2.13.3")
+  implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.3")
 
-  implementation("ch.qos.logback:logback-classic:1.2.3")
+  implementation("ch.qos.logback:logback-classic:1.2.11")
 
-  implementation("commons-codec:commons-codec:1.14")
+  implementation("commons-codec:commons-codec:1.15")
 
-  testImplementation("org.junit.jupiter:junit-jupiter:5.6.0")
+  testImplementation("org.junit.jupiter:junit-jupiter:5.8.2")
 }
 
 tasks.withType<KotlinCompile> {
