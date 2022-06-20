@@ -283,7 +283,7 @@ open class MongoDatabase(
       val indexOptions: (IndexOptions.() -> Unit)? = indexDefinition.indexOptions
       val indexName: String
 
-      private inner class PartialIndexFilter(val fieldName: String, val operator: String, val value: Any) {
+      private inner class PartialIndexFilter(val fieldName: String, val operator: String, val value: Any?) {
         val valueAsString: String = when (value) {
           is Date -> value.toIsoString()
           else -> value.toString()

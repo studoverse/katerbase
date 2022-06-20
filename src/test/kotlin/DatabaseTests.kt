@@ -28,6 +28,7 @@ class DatabaseTests {
     var map: Map<String, String> = mapOf()
     var byteArray: ByteArray = "yolo".toByteArray()
     var dateArray = emptyList<Date>()
+    var nullableString: String? = null
   }
 
   class SimpleMongoPayload : MongoMainEntry() {
@@ -237,7 +238,7 @@ class DatabaseTests {
     val payload = EnumMongoPayload()
     val bson = payload.toBSONDocument()
     assert(bson["computedProp"] == null)
-    assertEquals(14, bson.size)
+    assertEquals(15, bson.size)
   }
 /*
   @Test
@@ -613,6 +614,11 @@ class DatabaseTests {
         collection<EnumMongoPayload>("enumColl") {
           index(EnumMongoPayload::value1.ascending())
           index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
+          index(
+            EnumMongoPayload::nullableString.ascending(), partialIndex = arrayOf(
+              EnumMongoPayload::nullableString equal null
+            )
+          )
         }
         collection<SimpleMongoPayload>("simpleMongoColl")
         collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
