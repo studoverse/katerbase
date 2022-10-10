@@ -593,6 +593,40 @@ class BlockingDatabaseTests {
     assertEquals(2, collection.find().limit(1000).skip(98).toList().count())
   }
 
+  @Test
+  fun sort() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+
+    val insertedPayloads = (1..100)
+      .map { EnumMongoPayload().apply { _id = randomId(); long = it.toLong() % 23 } }
+      .onEach { collection.insertOne(it, upsert = false) }
+
+    assertEquals(insertedPayloads.minOf { it.long }, collection.find().sortBy(EnumMongoPayload::long).toList().first().long)
+    assertEquals(insertedPayloads.maxOf { it.long }, collection.find().sortBy(EnumMongoPayload::long).toList().last().long)
+
+    assertEquals(insertedPayloads.maxOf { it.long }, collection.find().sortByDescending(EnumMongoPayload::long).toList().first().long)
+    assertEquals(insertedPayloads.minOf { it.long }, collection.find().sortByDescending(EnumMongoPayload::long).toList().last().long)
+  }
+
+  @Test
+  fun fieldSelection() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+    val longInsertedValue = 12345678L
+    val stringListInsertedValue = listOf("a", "b", "c")
+
+    (1..100)
+      .map { EnumMongoPayload().apply { _id = randomId(); long = longInsertedValue; stringList = stringListInsertedValue } }
+      .onEach { collection.insertOne(it, upsert = false) }
+
+    @Suppress("DEPRECATION")
+    assertEquals(EnumMongoPayload().long, collection.find().excludeFields(EnumMongoPayload::long).toList().first().long)
+    @Suppress("DEPRECATION")
+    assertEquals(stringListInsertedValue, collection.find().excludeFields(EnumMongoPayload::long).toList().first().stringList)
+
+    assertEquals(longInsertedValue, collection.find().selectedFields(EnumMongoPayload::long).toList().first().long)
+    assertEquals(EnumMongoPayload().stringList, collection.find().selectedFields(EnumMongoPayload::long).toList().first().stringList)
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 
