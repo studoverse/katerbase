@@ -63,7 +63,7 @@ open class MongoDatabase(
   inline fun <reified T : MongoMainEntry> getCollection() = getCollection(entryClass = T::class)
 
   open fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
-    return SuspendingMongoCollection(mongoCollection = getCollection(entryClass))
+    return SuspendingMongoCollection(blockingCollection = getCollection(entryClass))
   }
 
   inline fun <reified T : MongoMainEntry> getSuspendingCollection() = getSuspendingCollection(entryClass = T::class)
@@ -802,19 +802,19 @@ open class MongoDatabase(
   }
 
   inner class SuspendingMongoCollection<Entry : MongoMainEntry>(
-    private val mongoCollection: MongoCollection<Entry>
+    val blockingCollection: MongoCollection<Entry>
   ) {
     private suspend fun <R> runOnIo(block: suspend CoroutineScope.() -> R): R {
       return withContext(Dispatchers.IO, block)
     }
 
-    val name: String get() = mongoCollection.name
-    val entryClass: KClass<Entry> get() = mongoCollection.entryClass
+    val name: String get() = blockingCollection.name
+    val entryClass: KClass<Entry> get() = blockingCollection.entryClass
 
     fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), changeBufferCapacity: Int = 64): Channel<PayloadChange<Entry>> {
       val channel = Channel<PayloadChange<Entry>>(changeBufferCapacity)
 
-      mongoCollection.watch(ignoredFields) { change ->
+      blockingCollection.watch(ignoredFields) { change ->
         runBlocking { channel.send(change) }
       }
 
@@ -822,26 +822,26 @@ open class MongoDatabase(
     }
 
     suspend fun drop() {
-      runOnIo { mongoCollection.drop() }
+      runOnIo { blockingCollection.drop() }
     }
 
     suspend fun clear(): DeleteResult {
-      return runOnIo { mongoCollection.clear() }
+      return runOnIo { blockingCollection.clear() }
     }
 
     suspend fun count(vararg filter: FilterPair): Long {
-      return runOnIo { mongoCollection.count(*filter) }
+      return runOnIo { blockingCollection.count(*filter) }
     }
 
     suspend fun bulkWrite(
       options: BulkWriteOptions = BulkWriteOptions(),
       action: MongoCollection<Entry>.BulkOperation.() -> Unit
     ): BulkWriteResult {
-      return runOnIo { mongoCollection.bulkWrite(options, action) }
+      return runOnIo { blockingCollection.bulkWrite(options, action) }
     }
 
     suspend fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): FlowAggregateCursor<T> {
-      return runOnIo { FlowAggregateCursor(mongoCollection.aggregate(pipeline, entryClass)) }
+      return runOnIo { FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass)) }
     }
 
     suspend inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): FlowAggregateCursor<T> {
@@ -860,25 +860,27 @@ open class MongoDatabase(
 
     suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
       return withContext(Dispatchers.IO) {
-        val cursor = mongoCollection.find(*filter)
+        val cursor = blockingCollection.find(*filter)
         FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection)
       }
     }
 
     suspend fun findOne(vararg filter: FilterPair): Entry? {
-      return runOnIo { mongoCollection.findOne(*filter) }
+      return runOnIo { blockingCollection.findOne(*filter) }
     }
 
     suspend fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
-      return runOnIo { mongoCollection.findOneOrInsert(*filter, newEntry = newEntry) }
+      return runOnIo { blockingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
     }
 
+    // TODO implement distinct on suspending collections
+
     suspend fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { mongoCollection.updateOne(*filter, update = update) }
+      return runOnIo { blockingCollection.updateOne(*filter, update = update) }
     }
 
     suspend fun updateOneOrInsert(filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { mongoCollection.updateOneOrInsert(filter, update = update) }
+      return runOnIo { blockingCollection.updateOneOrInsert(filter, update = update) }
     }
 
     suspend fun updateOneAndFind(
@@ -887,27 +889,31 @@ open class MongoDatabase(
       returnDocument: ReturnDocument = ReturnDocument.AFTER,
       update: MongoCollection<Entry>.UpdateOperation.() -> Unit
     ): Entry? {
-      return runOnIo { mongoCollection.updateOneAndFind(*filter, upsert = upsert, returnDocument = returnDocument, update = update) }
+      return runOnIo { blockingCollection.updateOneAndFind(*filter, upsert = upsert, returnDocument = returnDocument, update = update) }
     }
 
     suspend fun updateMany(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { mongoCollection.updateMany(*filter, update = update) }
+      return runOnIo { blockingCollection.updateMany(*filter, update = update) }
     }
 
     suspend fun insertOne(document: Entry, upsert: Boolean) {
-      return runOnIo { mongoCollection.insertOne(document, upsert) }
+      return runOnIo { blockingCollection.insertOne(document, upsert) }
     }
 
     suspend fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
-      return runOnIo { mongoCollection.insertOne(document, onDuplicateKey) }
+      return runOnIo { blockingCollection.insertOne(document, onDuplicateKey) }
     }
 
     suspend fun deleteOne(vararg filter: FilterPair): DeleteResult {
-      return runOnIo { mongoCollection.deleteOne(*filter) }
+      return runOnIo { blockingCollection.deleteOne(*filter) }
     }
 
     suspend fun deleteMany(vararg filter: FilterPair): DeleteResult {
-      return runOnIo { mongoCollection.deleteMany(*filter) }
+      return runOnIo { blockingCollection.deleteMany(*filter) }
+    }
+
+    suspend fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
+      return runOnIo { blockingCollection.getQueryStats(*filter, limit = limit) }
     }
   }
 
