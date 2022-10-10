@@ -182,7 +182,7 @@ class FlowFindCursor<Entry : MongoMainEntry>(
 private fun <Entry : Any> flowForDocumentClass(
   mongoIterable: MongoIterable<out Document>,
   clazz: KClass<Entry>
-): Flow<Entry> = mongoIterable.iterator()
+): Flow<Entry> = mongoIterable
   .asFlow()
   .map { document -> deserialize(document, clazz) }
   .flowOn(Dispatchers.IO)

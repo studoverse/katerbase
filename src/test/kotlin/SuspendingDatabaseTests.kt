@@ -608,6 +608,10 @@ class SuspendingDatabaseTests {
       .map { EnumMongoPayload().apply { _id = randomId(); long = it.toLong() % 23 } }
       .onEach { collection.insertOne(it, upsert = false) }
 
+    val query = collection.find().sortByDescending(EnumMongoPayload::long)
+    val iter = query.mongoIterable.iterator()
+    assertEquals(22, iter.next().getLong("long"))
+
     assertEquals(insertedPayloads.minOf { it.long }, collection.find().sortBy(EnumMongoPayload::long).toList().first().long)
     assertEquals(insertedPayloads.maxOf { it.long }, collection.find().sortBy(EnumMongoPayload::long).toList().last().long)
 
