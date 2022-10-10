@@ -87,7 +87,9 @@ Currently, the library is not yet published to Maven Central. To use Katerbase, 
 
 ## Read operations
 
-The following operations can be executed on a collection, for example `database.getCollection<Movie>.find()`.
+The following operations can be executed on a collection, for example `database.getCollection<Movie>.find()` for blocking operations
+and `database.getSuspendingCollection<Movie>.find()` for suspending operations
+via [coroutines](https://kotlinlang.org/docs/coroutines-overview.html).
 
 
 ### find
@@ -587,5 +589,3 @@ All Kotlin field values can be nullable, in that case `null` will be stored in t
 
 ## Project state
 Katerbase evolved from a few extensions functions that were created in December 2016 to a bunch of internally used MongoDB utility functions. The utility functions are currently used at [Moshbit](https://moshbit.com) in several projects. In 2019, we decided to create a standalone library out of the proofed mongo-java-driver wrapper functions. The library design was adapted several times to provide the goal of Katerbase: Writing concise and simple MongoDB queries without any boilerplate or ceremony. Many thanks to [@functionaldude](https://github.com/functionaldude) for all the long design discussions that lead into the current state of the project.
-
-It is planned to move Katerbase to the async driver of the mongo-java-driver and incorporate Kotlin coroutines into that.
