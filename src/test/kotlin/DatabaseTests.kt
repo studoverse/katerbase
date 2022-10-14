@@ -1,5 +1,3 @@
-package util
-
 import com.moshbit.katerbase.MongoMainEntry
 import java.util.*
 
