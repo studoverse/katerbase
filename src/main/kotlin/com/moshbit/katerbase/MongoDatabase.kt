@@ -873,7 +873,30 @@ open class MongoDatabase(
       return runOnIo { blockingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
     }
 
-    // TODO implement distinct on suspending collections
+    /**
+     * Use this if you need a set of distinct specific value of a document
+     * More info: https://docs.mongodb.com/manual/reference/method/db.collection.distinct/
+     */
+    suspend fun <T : Any> distinct(
+      distinctField: MongoEntryField<T>,
+      entryClass: KClass<T>,
+      vararg filter: FilterPair
+    ): FlowDistinctCursor<T> {
+      return runOnIo {
+        FlowDistinctCursor(
+          mongoIterable = blockingCollection.internalCollection.distinct(
+            /* fieldName = */ distinctField.name,
+            /* filter = */ filter.toFilterDocument(),
+            /* resultClass = */ entryClass.java
+          ),
+          clazz = entryClass
+        )
+      }
+    }
+
+    suspend inline fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): FlowDistinctCursor<T> {
+      return distinct(distinctField, T::class, *filter)
+    }
 
     suspend fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
       return runOnIo { blockingCollection.updateOne(*filter, update = update) }

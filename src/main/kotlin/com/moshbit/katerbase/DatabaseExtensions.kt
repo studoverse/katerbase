@@ -19,13 +19,16 @@ import org.bson.conversions.Bson
 import java.io.IOException
 import kotlin.reflect.KClass
 
-class DistinctCursor<Entry : Any>(val mongoIterable: DistinctIterable<Entry>, val clazz: KClass<Entry>) : Iterable<Entry> {
+abstract class AbstractDistinctCursor<Entry : Any>(val mongoIterable: DistinctIterable<Entry>, val clazz: KClass<Entry>)
+
+class DistinctCursor<Entry : Any>(mongoIterable: DistinctIterable<Entry>, clazz: KClass<Entry>) :
+  AbstractDistinctCursor<Entry>(mongoIterable, clazz), Iterable<Entry> {
   override fun iterator(): Iterator<Entry> = mongoIterable.iterator()
 }
 
 class FlowDistinctCursor<Entry : Any>(
-  distinctCursor: DistinctCursor<Entry>
-) : Flow<Entry> by distinctCursor.mongoIterable.asFlow().flowOn(Dispatchers.IO)
+  mongoIterable: DistinctIterable<Entry>, clazz: KClass<Entry>
+) : AbstractDistinctCursor<Entry>(mongoIterable, clazz), Flow<Entry> by mongoIterable.asFlow().flowOn(Dispatchers.IO)
 
 class AggregateCursor<Entry : Any>(val mongoIterable: AggregateIterable<Document>, val clazz: KClass<Entry>) : Iterable<Entry> {
   override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)

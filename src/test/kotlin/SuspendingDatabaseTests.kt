@@ -292,7 +292,6 @@ class SuspendingDatabaseTests {
     assert(get().isEmpty())
   }
 
-  /* TODO implement distinct on suspending collections
   @Test
   fun distinctTest(): Unit = runBlocking {
     val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
@@ -346,7 +345,7 @@ class SuspendingDatabaseTests {
     // We don't have equals/hashCode for distinct
     //assert(distinct1 == distinct1b)
     //assert(distinct1.hashCode() == distinct1b.hashCode())
-  }*/
+  }
 
   @Test
   fun longTest(): Unit = runBlocking {
