@@ -24,7 +24,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
-import kotlin.reflect.full.memberProperties
 
 /**
  * How to set-up a local mongodb development environment (on OSX)
@@ -204,41 +203,10 @@ open class MongoDatabase(
     /**
      * This only works if MongoDB is a replica set
      * To test this set up a local replica set (follow the README in local-development > local-mongo-replica-set)
-     * Use [ignoredFields] to exclude a set of fields, if any change occurs to these fields it will be ignored
+     * Use a custom [pipeline] to include only a specific set of fields / changes.
      */
-    fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), action: (PayloadChange<Entry>) -> Unit) {
+    fun watch(pipeline: Document = defaultWatchPipeline, action: (PayloadChange<Entry>) -> Unit) {
       require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation" }
-
-      // Add aggregation pipeline to stream
-      // https://stackoverflow.com/questions/49621939/how-to-watch-for-changes-to-specific-fields-in-mongodb-change-stream
-      val pipeline = Document().apply {
-        this["\$match"] = Document().apply {
-          this["\$or"] = listOf(
-            Document("operationType", "insert"),
-            Document("operationType", "replace"),
-            Document("operationType", "delete"),
-            Document().apply {
-              val filter = mutableListOf<Document>()
-              val ignoredMongoFields = ignoredFields.map { it.toMongoField() }.toSet()
-
-              // Get all the fields where we should listen for changes
-              val nonIgnoredMongoFields = entryClass.memberProperties
-                .map { it.toMongoField() }
-                .filter { it !in ignoredMongoFields }
-
-              nonIgnoredMongoFields.forEach { field ->
-                // Format must look like this -> { "updateDescription.updatedFields.SomeFieldA": { $exists: true } }
-                filter += Document("updateDescription.updatedFields.${field.name}", Document("\$exists", true))
-              }
-
-              this["\$and"] = listOf(
-                Document("operationType", "update"),
-                Document("\$or", filter)
-              )
-            }
-          )
-        }
-      }
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
 
@@ -269,7 +237,7 @@ open class MongoDatabase(
         } catch (e: java.lang.Exception) {
           thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
         }
-        watch(ignoredFields, action)
+        watch(pipeline, action)
       }
     }
 
@@ -811,10 +779,10 @@ open class MongoDatabase(
     val name: String get() = blockingCollection.name
     val entryClass: KClass<Entry> get() = blockingCollection.entryClass
 
-    fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), changeBufferCapacity: Int = 64): Channel<PayloadChange<Entry>> {
+    fun watch(pipeline: Document = defaultWatchPipeline, changeBufferCapacity: Int = 64): Channel<PayloadChange<Entry>> {
       val channel = Channel<PayloadChange<Entry>>(changeBufferCapacity)
 
-      blockingCollection.watch(ignoredFields) { change ->
+      blockingCollection.watch(pipeline) { change ->
         runBlocking { channel.send(change) }
       }
 
@@ -944,6 +912,18 @@ open class MongoDatabase(
     var logAllQueries = false // Set this to true if you want to debug your database queries
     private fun Document.asJsonString() = JsonHandler.toJsonString(this)
 
+    private val defaultWatchPipeline
+      get() = Document().apply {
+        this["\$match"] = Document().apply {
+          this["\$or"] = listOf(
+            Document("operationType", "insert"),
+            Document("operationType", "replace"),
+            Document("operationType", "delete"),
+            Document("operationType", "update"),
+          )
+        }
+      }
+
     fun createMongoClientFromUri(
       connectionString: ConnectionString,
       allowReadFromSecondaries: Boolean,
@@ -963,6 +943,7 @@ open class MongoDatabase(
               readConcern(ReadConcern.MAJORITY)
               writeConcern(WriteConcern.MAJORITY)
             }
+
             else -> {
               readPreference(ReadPreference.primaryPreferred())
               readConcern(ReadConcern.LOCAL)
