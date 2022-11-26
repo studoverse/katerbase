@@ -204,11 +204,18 @@ open class MongoDatabase(
      * This only works if MongoDB is a replica set
      * To test this set up a local replica set (follow the README in local-development > local-mongo-replica-set)
      * Use a custom [pipeline] to include only a specific set of fields / changes.
+     * Operation types: https://www.mongodb.com/docs/manual/reference/change-events/
      */
     fun watch(pipeline: Document = defaultWatchPipeline, action: (PayloadChange<Entry>) -> Unit) {
       require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation" }
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
+
+      fun invalidateChangeStream() {
+        // Send OperationType.INVALIDATE so clients know that change stream
+        // stopped working and they might missed some change events
+        action(PayloadChange(_id = "changeStream", payload = null, operationType = OperationType.INVALIDATE))
+      }
 
       thread(isDaemon = true) {
         try {
@@ -232,9 +239,11 @@ open class MongoDatabase(
             // The $changeStream stage is only supported on replica sets
             throw IllegalStateException("watch() can only be used in a replica set", e)
           } else {
+            invalidateChangeStream()
             thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
           }
         } catch (e: java.lang.Exception) {
+          invalidateChangeStream()
           thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
         }
         watch(pipeline, action)
