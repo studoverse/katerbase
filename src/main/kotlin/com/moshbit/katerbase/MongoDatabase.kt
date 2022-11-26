@@ -21,6 +21,7 @@ import org.bson.*
 import org.bson.conversions.Bson
 import java.util.*
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
@@ -211,42 +212,50 @@ open class MongoDatabase(
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
 
-      fun invalidateChangeStream() {
-        // Send OperationType.INVALIDATE so clients know that change stream
-        // stopped working and they might missed some change events
-        action(PayloadChange(_id = "changeStream", payload = null, operationType = OperationType.INVALIDATE))
-      }
+      val sendChangeStreamInvalidatedMessage = AtomicBoolean(false)
 
       thread(isDaemon = true) {
-        try {
-          internalCollection.watch(listOf(pipeline))
-            .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
-            .forEach { document ->
-              val change = PayloadChange(
-                _id = (document.documentKey!!["_id"] as BsonString).value,
-                payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
-                operationType = document.operationType
-              )
-              try {
-                action(change)
-              } catch (e: Exception) {
-                // If action fails, handle the exception but do not close the changeStream
-                Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), e) ?: thread { throw e }
+        tailrec fun startListening() {
+          try {
+            internalCollection.watch(listOf(pipeline))
+              .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
+              .forEach { document ->
+                val change = PayloadChange(
+                  _id = (document.documentKey!!["_id"] as BsonString).value,
+                  payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
+                  operationType = document.operationType
+                )
+                try {
+                  if (sendChangeStreamInvalidatedMessage.get()) {
+                    // Send OperationType.INVALIDATE so clients know that change stream
+                    // stopped working, and they might miss some change events.
+                    // Only send INVALIDATE after we get the first change event from the new change stream, so we clients can
+                    // make sure that after receiving and handling an INVALIDATE no further change events will be missed.
+                    action(PayloadChange(_id = "changeStream", payload = null, operationType = OperationType.INVALIDATE))
+                    sendChangeStreamInvalidatedMessage.set(false)
+                  }
+                  action(change)
+                } catch (e: Exception) {
+                  // If action fails, handle the exception but do not close the changeStream
+                  Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), e) ?: thread { throw e }
+                }
               }
+          } catch (e: MongoCommandException) {
+            if (e.code == 40573) {
+              // The $changeStream stage is only supported on replica sets
+              throw IllegalStateException("watch() can only be used in a replica set", e)
+            } else {
+              sendChangeStreamInvalidatedMessage.set(true)
+              thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
             }
-        } catch (e: MongoCommandException) {
-          if (e.code == 40573) {
-            // The $changeStream stage is only supported on replica sets
-            throw IllegalStateException("watch() can only be used in a replica set", e)
-          } else {
-            invalidateChangeStream()
+          } catch (e: java.lang.Exception) {
+            sendChangeStreamInvalidatedMessage.set(true)
             thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
           }
-        } catch (e: java.lang.Exception) {
-          invalidateChangeStream()
-          thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
+          startListening()
         }
-        watch(pipeline, action)
+
+        startListening()
       }
     }
 
