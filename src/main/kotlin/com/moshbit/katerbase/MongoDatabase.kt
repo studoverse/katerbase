@@ -7,6 +7,7 @@ import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoClient
 import com.mongodb.client.MongoClients
 import com.mongodb.client.model.*
+import com.mongodb.client.model.changestream.ChangeStreamDocument
 import com.mongodb.client.model.changestream.FullDocument
 import com.mongodb.client.model.changestream.OperationType
 import com.mongodb.client.result.DeleteResult
@@ -21,7 +22,7 @@ import org.bson.*
 import org.bson.conversions.Bson
 import java.util.*
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
@@ -212,28 +213,24 @@ open class MongoDatabase(
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
 
-      val sendChangeStreamInvalidatedMessage = AtomicBoolean(false)
+      val resumeToken = AtomicReference<BsonDocument?>()
 
       thread(isDaemon = true) {
         tailrec fun startListening() {
           try {
             internalCollection.watch(listOf(pipeline))
-              .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
-              .forEach { document ->
+              .apply {
+                fullDocument(FullDocument.UPDATE_LOOKUP)
+                resumeToken.get()?.let { resumeAfter(it) }
+              }
+              .forEach { document: ChangeStreamDocument<Document> ->
+                resumeToken.set(document.resumeToken)
                 val change = PayloadChange(
                   _id = (document.documentKey!!["_id"] as BsonString).value,
                   payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
                   operationType = document.operationType
                 )
                 try {
-                  if (sendChangeStreamInvalidatedMessage.get()) {
-                    // Send OperationType.INVALIDATE so clients know that change stream
-                    // stopped working, and they might miss some change events.
-                    // Only send INVALIDATE after we get the first change event from the new change stream, so we clients can
-                    // make sure that after receiving and handling an INVALIDATE no further change events will be missed.
-                    action(PayloadChange(_id = "changeStream", payload = null, operationType = OperationType.INVALIDATE))
-                    sendChangeStreamInvalidatedMessage.set(false)
-                  }
                   action(change)
                 } catch (e: Exception) {
                   // If action fails, handle the exception but do not close the changeStream
@@ -245,11 +242,9 @@ open class MongoDatabase(
               // The $changeStream stage is only supported on replica sets
               throw IllegalStateException("watch() can only be used in a replica set", e)
             } else {
-              sendChangeStreamInvalidatedMessage.set(true)
               thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
             }
           } catch (e: java.lang.Exception) {
-            sendChangeStreamInvalidatedMessage.set(true)
             thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
           }
           startListening()
