@@ -1,0 +1,17 @@
+version: '2'
+services:
+  ## Replica set members
+  server1:
+    image: mongo:4.0.3
+    command: mongod --port 27027 --replSet local-rs --noprealloc --smallfiles --oplogSize 1 --bind_ip_all
+    ports:
+      - "27027:27027"
+    volumes:
+      - ./scripts:/scripts
+  server2:
+    image: mongo:4.0.3
+    command: mongod --port 27037 --replSet local-rs --noprealloc --smallfiles --oplogSize 1 --bind_ip_all
+    ports:
+      - "27037:27037"
+    volumes:
+      - ./scripts:/scripts
