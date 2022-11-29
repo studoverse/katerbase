@@ -37,7 +37,7 @@ fun main() {
         ?: 1
 
     if (testValueInChange != lastChange + 1) {
-      println("Missed change -> testValue in change: ${testValueInChange}, lastChange: ${lastChange}")
+      println("Missed change -> testValueInChange: ${testValueInChange}, lastChange: ${lastChange}")
     } else if (lastChange % 10 == 0) {
       println("lastChange: $lastChange")
     }
