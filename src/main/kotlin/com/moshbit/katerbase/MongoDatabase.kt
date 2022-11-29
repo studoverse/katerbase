@@ -7,6 +7,7 @@ import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoClient
 import com.mongodb.client.MongoClients
 import com.mongodb.client.model.*
+import com.mongodb.client.model.changestream.ChangeStreamDocument
 import com.mongodb.client.model.changestream.FullDocument
 import com.mongodb.client.model.changestream.OperationType
 import com.mongodb.client.result.DeleteResult
@@ -20,8 +21,10 @@ import kotlinx.coroutines.withContext
 import org.bson.*
 import org.bson.conversions.Bson
 import java.util.*
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlin.math.absoluteValue
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
 
@@ -186,7 +189,8 @@ open class MongoDatabase(
   data class PayloadChange<Entry : MongoMainEntry>(
     val _id: String,
     val payload: Entry?, // Payload is not available when operationType is DELETED
-    val operationType: OperationType
+    val operationType: OperationType,
+    val internalChangeStreamDocument: ChangeStreamDocument<Document>,
   )
 
   // Mongo collection wrapper for Kotlin
@@ -204,41 +208,57 @@ open class MongoDatabase(
      * This only works if MongoDB is a replica set
      * To test this set up a local replica set (follow the README in local-development > local-mongo-replica-set)
      * Use a custom [pipeline] to include only a specific set of fields / changes.
+     * Operation types: https://www.mongodb.com/docs/manual/reference/change-events/
      */
-    fun watch(pipeline: Document = defaultWatchPipeline, action: (PayloadChange<Entry>) -> Unit) {
+    fun watch(pipeline: Document = defaultWatchPipeline, action: (Result<PayloadChange<Entry>>) -> Unit) {
       require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation" }
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
 
-      thread(isDaemon = true) {
+      var watchStartedSemaphore: Semaphore? = Semaphore(0)
+
+      fun executeActionSafely(result: Result<PayloadChange<Entry>>) {
         try {
-          internalCollection.watch(listOf(pipeline))
-            .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
-            .forEach { document ->
-              val change = PayloadChange(
-                _id = (document.documentKey!!["_id"] as BsonString).value,
-                payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
-                operationType = document.operationType
-              )
-              try {
-                action(change)
-              } catch (e: Exception) {
-                // If action fails, handle the exception but do not close the changeStream
-                Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), e) ?: thread { throw e }
-              }
-            }
-        } catch (e: MongoCommandException) {
-          if (e.code == 40573) {
-            // The $changeStream stage is only supported on replica sets
-            throw IllegalStateException("watch() can only be used in a replica set", e)
-          } else {
-            thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
-          }
-        } catch (e: java.lang.Exception) {
-          thread { throw e } // Not sure what just happened. Log the error and restart the watch() operation
+          action(result)
+        } catch (e: Exception) {
+          // If action fails, handle the exception but do not close the changeStream
+          Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), e) ?: thread { throw e }
         }
-        watch(pipeline, action)
       }
+
+      thread(isDaemon = true, name = "katerbase-watch-${name}-${Random().nextInt().absoluteValue}") {
+        while (true) {
+          try {
+            internalCollection.watch(listOf(pipeline))
+              .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
+              .iterator() // Calling the iterator actually executes the query on the DB server.
+              .also {
+                // Query has been executed, so now it's safe to return for the watch function.
+                // This makes sure that when watch returns, changes are already coming in.
+                watchStartedSemaphore?.release()
+              }
+              .forEach { document: ChangeStreamDocument<Document> ->
+                val change = PayloadChange(
+                  _id = (document.documentKey!!["_id"] as BsonString).value,
+                  payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
+                  operationType = document.operationType,
+                  internalChangeStreamDocument = document,
+                )
+                executeActionSafely(Result.success(change))
+              }
+          } catch (e: Exception) {
+            if ((e as? MongoCommandException)?.code == 40573) {
+              // The $changeStream stage is only supported on replica sets
+              throw IllegalStateException("watch() can only be used in a replica set", e)
+            } else {
+              executeActionSafely(Result.failure(e))
+            }
+          }
+        }
+      }
+
+      watchStartedSemaphore!!.acquire()
+      watchStartedSemaphore = null
     }
 
     // The index name is based on bson and partialIndex. Therefore when changing the bson or the partialIndex, the old index
@@ -779,8 +799,8 @@ open class MongoDatabase(
     val name: String get() = blockingCollection.name
     val entryClass: KClass<Entry> get() = blockingCollection.entryClass
 
-    fun watch(pipeline: Document = defaultWatchPipeline, changeBufferCapacity: Int = 64): Channel<PayloadChange<Entry>> {
-      val channel = Channel<PayloadChange<Entry>>(changeBufferCapacity)
+    fun watch(pipeline: Document = defaultWatchPipeline, changeBufferCapacity: Int = 64): Channel<Result<PayloadChange<Entry>>> {
+      val channel = Channel<Result<PayloadChange<Entry>>>(changeBufferCapacity)
 
       blockingCollection.watch(pipeline) { change ->
         runBlocking { channel.send(change) }
