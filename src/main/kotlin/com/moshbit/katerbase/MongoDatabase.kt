@@ -231,7 +231,7 @@ open class MongoDatabase(
           try {
             internalCollection.watch(listOf(pipeline))
               .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
-              .iterator()  // Calling the iterator actually executes the query on the DB server.
+              .iterator() // Calling the iterator actually executes the query on the DB server.
               .also {
                 // Query has been executed, so now it's safe to return for the watch function.
                 // This makes sure that when watch returns, changes are already coming in.
