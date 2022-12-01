@@ -40,6 +40,12 @@ tasks.test {
   }
 }
 
+kotlin {
+  jvmToolchain {
+    languageVersion.set(JavaLanguageVersion.of("17")) // Auto-download JDK for developers
+  }
+}
+
 publishing {
   publications {
     create<MavenPublication>("default") {
