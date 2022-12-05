@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   `maven-publish`
-  kotlin("jvm") version "1.7.0"
+  kotlin("jvm") version "1.7.21"
 }
 
 group = "com.moshbit.katerbase"
@@ -37,6 +37,12 @@ tasks.test {
   useJUnitPlatform()
   testLogging {
     events("passed", "skipped", "failed")
+  }
+}
+
+kotlin {
+  jvmToolchain {
+    languageVersion.set(JavaLanguageVersion.of("17")) // Auto-download JDK for developers
   }
 }
 
