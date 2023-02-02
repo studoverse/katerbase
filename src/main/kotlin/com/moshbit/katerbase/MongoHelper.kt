@@ -366,23 +366,23 @@ class AggregationPipeline {
 
     class Accumulator(val bsonField: BsonField)
 
-    fun sum(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+    fun sum(field: MongoEntryField<out Number>, value: MongoEntryField<out Number?>) {
       accumulators += Accumulator(bsonField = Accumulators.sum(field.name, "\$${value.name}"))
     }
 
-    fun average(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+    fun average(field: MongoEntryField<out Number>, value: MongoEntryField<out Number?>) {
       accumulators += Accumulator(bsonField = Accumulators.avg(field.name, "\$${value.name}"))
     }
 
-    fun max(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+    fun max(field: MongoEntryField<out Number>, value: MongoEntryField<out Number?>) {
       accumulators += Accumulator(bsonField = Accumulators.max(field.name, "\$${value.name}"))
     }
 
-    fun min(field: MongoEntryField<out Number>, value: MongoEntryField<out Number>) {
+    fun min(field: MongoEntryField<out Number>, value: MongoEntryField<out Number?>) {
       accumulators += Accumulator(bsonField = Accumulators.min(field.name, "\$${value.name}"))
     }
 
-    fun count(field: MongoEntryField<out Number>) {
+    fun count(field: MongoEntryField<out Number?>) {
       accumulators += Accumulator(bsonField = Accumulators.sum(field.name, 1))
     }
 
