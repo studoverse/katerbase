@@ -71,6 +71,10 @@ open class MongoDatabase(
 
   inline fun <reified T : MongoMainEntry> getSuspendingCollection() = getSuspendingCollection(entryClass = T::class)
 
+  /**
+   * Use the [TransactionalDatabase]s to modify the DB state in a transaction.
+   * See https://www.mongodb.com/docs/manual/core/transactions/ for more info and examples.
+   */
   suspend fun executeTransaction(action: suspend (database: TransactionalDatabase) -> Unit) {
     require(supportChangeStreams) { "supportChangeStreams must be true for the executeTransaction() operation" }
     val transactionalDatabase = runOnIo { TransactionalDatabase() }
@@ -84,7 +88,7 @@ open class MongoDatabase(
         runOnIo { session.commitTransaction() }
       } catch (throwable: Throwable) {
         runOnIo {
-          session.abortTransaction() // Do not commit transaction to DB in case of exception.
+          runOnIo { session.abortTransaction() } // Do not commit transaction to DB in case of exception.
         }
         throw throwable
       }
@@ -104,10 +108,6 @@ open class MongoDatabase(
         .build()
     )
 
-    /**
-     * Use the [TransactionalCollection]s to modify the DB state in a transaction.
-     * See https://www.mongodb.com/docs/manual/core/transactions/ for more info and examples.
-     */
     inner class TransactionalCollection<Entry : MongoMainEntry>(mongoCollection: MongoCollection<Entry>) : MongoCollection<Entry>(
       internalCollection = mongoCollection.internalCollection,
       entryClass = mongoCollection.entryClass,
