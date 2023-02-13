@@ -2,35 +2,35 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   `maven-publish`
-  kotlin("jvm") version "1.7.21"
+  kotlin("jvm") version "1.8.10"
 }
 
 group = "com.moshbit.katerbase"
-version = "0.1.2"
+version = "0.1.3"
 
 repositories {
   mavenCentral()
 }
 
 dependencies {
-  implementation(kotlin("stdlib-jdk8"))
+  implementation(kotlin("stdlib"))
 
-  implementation("org.mongodb:mongodb-driver-sync:4.6.0")
+  implementation("org.mongodb:mongodb-driver-sync:4.9.0")
 
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.2")
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
 
-  implementation("com.fasterxml.jackson.core:jackson-core:2.13.3")
-  implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.3")
+  implementation("com.fasterxml.jackson.core:jackson-core:2.14.2")
+  implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.14.2")
 
   implementation("ch.qos.logback:logback-classic:1.2.11")
 
   implementation("commons-codec:commons-codec:1.15")
 
-  testImplementation("org.junit.jupiter:junit-jupiter:5.8.2")
+  testImplementation("org.junit.jupiter:junit-jupiter:5.9.2")
 }
 
 tasks.withType<KotlinCompile> {
-  kotlinOptions.jvmTarget = "1.8"
+  kotlinOptions.jvmTarget = "11"
 }
 
 tasks.test {
