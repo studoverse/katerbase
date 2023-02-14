@@ -3,6 +3,7 @@ package com.moshbit.katerbase
 import ch.qos.logback.classic.Level
 import com.mongodb.*
 import com.mongodb.bulk.BulkWriteResult
+import com.mongodb.client.ClientSession
 import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoClient
 import com.mongodb.client.MongoClients
@@ -70,6 +71,56 @@ open class MongoDatabase(
 
   inline fun <reified T : MongoMainEntry> getSuspendingCollection() = getSuspendingCollection(entryClass = T::class)
 
+  /**
+   * Use the [TransactionalDatabase]s to modify the DB state in a transaction.
+   * See https://www.mongodb.com/docs/manual/core/transactions/ for more info and examples.
+   */
+  suspend fun executeTransaction(action: suspend (database: TransactionalDatabase) -> Unit) {
+    require(supportChangeStreams) { "supportChangeStreams must be true for the executeTransaction() operation, transactions are only supported on replica sets." }
+    val transactionalDatabase = runOnIo { TransactionalDatabase() }
+
+    // Sessions time out after 30 minutes, but close it now to save resources
+    // https://www.mongodb.com/docs/manual/reference/command/startSession/
+    transactionalDatabase.session.use { session ->
+      runOnIo { session.startTransaction() }
+      try {
+        action(transactionalDatabase)
+        runOnIo { session.commitTransaction() }
+      } catch (throwable: Throwable) {
+        runOnIo { session.abortTransaction() } // Do not commit transaction to DB in case of exception.
+        throw throwable
+      }
+    }
+  }
+
+  inner class TransactionalDatabase {
+    val session: ClientSession = client.startSession(
+      ClientSessionOptions.builder()
+        .causallyConsistent(true)
+        .snapshot(false)
+        .defaultTransactionOptions(
+          TransactionOptions.builder()
+            .readPreference(ReadPreference.primary())
+            .build()
+        )
+        .build()
+    )
+
+    inner class TransactionalCollection<Entry : MongoMainEntry>(mongoCollection: MongoCollection<Entry>) : MongoCollection<Entry>(
+      internalCollection = mongoCollection.internalCollection,
+      entryClass = mongoCollection.entryClass,
+      session = session,
+      indexes = emptyList(), // Indexes are already created so no need to declare them here.
+    )
+
+    fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
+      val transactionalCollection = TransactionalCollection(mongoCollection = this@MongoDatabase.getCollection(entryClass))
+      return SuspendingMongoCollection(blockingCollection = transactionalCollection)
+    }
+
+    inline fun <reified T : MongoMainEntry> getSuspendingCollection() = getSuspendingCollection(entryClass = T::class)
+  }
+
   class DuplicateKeyException(key: String) : IllegalStateException("Duplicate key: $key was already in collection.")
 
   fun getDatabaseStats(): DatabaseStats {
@@ -107,14 +158,26 @@ open class MongoDatabase(
 
     mongoCollections = databaseDefinition.collections.associateBy(
       keySelector = { it.modelClass },
-      valueTransform = { MongoCollection(internalDatabase.getCollection(it.collectionName), it.modelClass, it.indexes) }
+      valueTransform = {
+        MongoCollection(
+          internalCollection = internalDatabase.getCollection(it.collectionName),
+          entryClass = it.modelClass,
+          indexes = it.indexes,
+        )
+      }
     )
 
     changeStreamCollections = if (supportChangeStreams) {
       val changeStreamClientDatabase = changeStreamClient!!.getDatabase(connectionString.database!!)
       databaseDefinition.collections.associateBy(
         keySelector = { it.modelClass },
-        valueTransform = { MongoCollection(changeStreamClientDatabase.getCollection(it.collectionName), it.modelClass, it.indexes) }
+        valueTransform = {
+          MongoCollection(
+            internalCollection = changeStreamClientDatabase.getCollection(it.collectionName),
+            entryClass = it.modelClass,
+            indexes = it.indexes,
+          )
+        }
       )
     } else emptyMap()
 
@@ -197,7 +260,8 @@ open class MongoDatabase(
   open inner class MongoCollection<Entry : MongoMainEntry>(
     val internalCollection: com.mongodb.client.MongoCollection<Document>,
     val entryClass: KClass<Entry>,
-    indexes: List<MongoDatabaseDefinition.Collection.Index>
+    val session: ClientSession? = null,
+    indexes: List<MongoDatabaseDefinition.Collection.Index>,
   ) {
 
     val name: String get() = internalCollection.namespace.collectionName
@@ -211,7 +275,7 @@ open class MongoDatabase(
      * Operation types: https://www.mongodb.com/docs/manual/reference/change-events/
      */
     fun watch(pipeline: Document = defaultWatchPipeline, action: (Result<PayloadChange<Entry>>) -> Unit) {
-      require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation" }
+      require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation, change streams are only supported on replica sets." }
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
 
@@ -227,9 +291,15 @@ open class MongoDatabase(
       }
 
       thread(isDaemon = true, name = "katerbase-watch-${name}-${Random().nextInt().absoluteValue}") {
+        fun watch() = if (session != null) {
+          internalCollection.watch(session, listOf(pipeline))
+        } else {
+          internalCollection.watch(listOf(pipeline))
+        }
+
         while (true) {
           try {
-            internalCollection.watch(listOf(pipeline))
+            watch()
               .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
               .iterator() // Calling the iterator actually executes the query on the DB server.
               .also {
@@ -334,7 +404,11 @@ open class MongoDatabase(
 
     fun count(vararg filter: FilterPair): Long {
       if (logAllQueries) println("count: ${filter.toFilterDocument().asJsonString()}")
-      return if (filter.isEmpty()) internalCollection.estimatedDocumentCount() else internalCollection.countDocuments(filter.toFilterDocument())
+      return when {
+        session != null -> internalCollection.countDocuments(session, filter.toFilterDocument())
+        filter.isEmpty() -> internalCollection.estimatedDocumentCount()
+        else -> internalCollection.countDocuments(filter.toFilterDocument())
+      }
     }
 
     fun bulkWrite(options: BulkWriteOptions = BulkWriteOptions(), action: BulkOperation.() -> Unit): BulkWriteResult {
@@ -343,7 +417,11 @@ open class MongoDatabase(
         // Acknowledge empty bulk write
         return BulkWriteResult.acknowledged(0, 0, 0, 0, emptyList(), emptyList())
       }
-      return internalCollection.bulkWrite(models, options)
+      return if (session != null) {
+        internalCollection.bulkWrite(session, models, options)
+      } else {
+        internalCollection.bulkWrite(models, options)
+      }
     }
 
     private fun Document.toClass() = JsonHandler.fromBson(this, entryClass)
@@ -364,10 +442,18 @@ open class MongoDatabase(
 
     fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T> {
       return AggregateCursor(
-        mongoIterable = internalCollection.aggregate(
-          /* pipeline = */ pipeline.bson,
-          /* resultClass = */ Document::class.java
-        ),
+        mongoIterable = if (session != null) {
+          internalCollection.aggregate(
+            /* clientSession = */ session,
+            /* pipeline = */ pipeline.bson,
+            /* resultClass = */ Document::class.java
+          )
+        } else {
+          internalCollection.aggregate(
+            /* pipeline = */ pipeline.bson,
+            /* resultClass = */ Document::class.java
+          )
+        },
         clazz = entryClass
       )
     }
@@ -388,7 +474,11 @@ open class MongoDatabase(
 
     fun find(vararg filter: FilterPair): FindCursor<Entry> {
       if (logAllQueries) println("find: ${filter.toFilterDocument().asJsonString()} (pipeline: ${filter.getExecutionPipeline()})")
-      return internalCollection.find(filter.toFilterDocument()).toClasses()
+      return if (session != null) {
+        internalCollection.find(session, filter.toFilterDocument())
+      } else {
+        internalCollection.find(filter.toFilterDocument())
+      }.toClasses()
     }
 
     fun findOne(vararg filter: FilterPair): Entry? {
@@ -420,11 +510,20 @@ open class MongoDatabase(
      */
     fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
       return DistinctCursor(
-        mongoIterable = internalCollection.distinct(
-          /* fieldName = */ distinctField.name,
-          /* filter = */ filter.toFilterDocument(),
-          /* resultClass = */ entryClass.java
-        ),
+        mongoIterable = if (session != null) {
+          internalCollection.distinct(
+            /* clientSession = */ session,
+            /* fieldName = */ distinctField.name,
+            /* filter = */ filter.toFilterDocument(),
+            /* resultClass = */ entryClass.java
+          )
+        } else {
+          internalCollection.distinct(
+            /* fieldName = */ distinctField.name,
+            /* filter = */ filter.toFilterDocument(),
+            /* resultClass = */ entryClass.java
+          )
+        },
         clazz = entryClass
       )
     }
@@ -443,7 +542,11 @@ open class MongoDatabase(
         append("   mutator: ${mutator.asJsonString()}\n")
         append("   pipeline: ${filter.getExecutionPipeline()}\n")
       })
-      return internalCollection.updateOne(filter.toFilterDocument(), mutator, UpdateOptions().upsert(false))
+      return if (session != null) {
+        internalCollection.updateOne(session, filter.toFilterDocument(), mutator, UpdateOptions().upsert(false))
+      } else {
+        internalCollection.updateOne(filter.toFilterDocument(), mutator, UpdateOptions().upsert(false))
+      }
     }
 
     fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
@@ -460,7 +563,11 @@ open class MongoDatabase(
       })
 
       return retryMongoOperationOnDuplicateKeyError {
-        internalCollection.updateOne(arrayOf(filter).toFilterDocument(), mutator, UpdateOptions().upsert(true))
+        if (session != null) {
+          internalCollection.updateOne(session, arrayOf(filter).toFilterDocument(), mutator, UpdateOptions().upsert(true))
+        } else {
+          internalCollection.updateOne(arrayOf(filter).toFilterDocument(), mutator, UpdateOptions().upsert(true))
+        }
       }
     }
 
@@ -484,7 +591,11 @@ open class MongoDatabase(
       })
 
       return retryMongoOperationOnDuplicateKeyError {
-        internalCollection.findOneAndUpdate(filter.toFilterDocument(), mutator, options)?.toClass()
+        if (session != null) {
+          internalCollection.findOneAndUpdate(session, filter.toFilterDocument(), mutator, options)?.toClass()
+        } else {
+          internalCollection.findOneAndUpdate(filter.toFilterDocument(), mutator, options)?.toClass()
+        }
       }
     }
 
@@ -497,18 +608,31 @@ open class MongoDatabase(
         append("   mutator: ${mutator.asJsonString()}\n")
         append("   pipeline: ${filter.getExecutionPipeline()}\n")
       })
-      return internalCollection.updateMany(filter.toFilterDocument(), mutator)
+      return if (session != null) {
+        internalCollection.updateMany(session, filter.toFilterDocument(), mutator)
+      } else {
+        internalCollection.updateMany(filter.toFilterDocument(), mutator)
+      }
     }
 
     /** Throws on duplicate key when upsert=false */
     fun insertOne(document: Entry, upsert: Boolean): Any /* InsertOneResult | UpdateResult */ {
       return if (upsert) {
         retryMongoOperationOnDuplicateKeyError {
-          internalCollection.replaceOne(
-            Document().apply { put("_id", document._id) },
-            document.toBSONDocument(),
-            ReplaceOptions().upsert(true)
-          )
+          if (session != null) {
+            internalCollection.replaceOne(
+              session,
+              Document().apply { put("_id", document._id) },
+              document.toBSONDocument(),
+              ReplaceOptions().upsert(true)
+            )
+          } else {
+            internalCollection.replaceOne(
+              Document().apply { put("_id", document._id) },
+              document.toBSONDocument(),
+              ReplaceOptions().upsert(true)
+            )
+          }
         }
       } else {
         insertOne(document, onDuplicateKey = { throw DuplicateKeyException(key = document._id) })!!
@@ -517,7 +641,11 @@ open class MongoDatabase(
 
     fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
       try {
-        return internalCollection.insertOne(document.toBSONDocument())
+        return if (session != null) {
+          internalCollection.insertOne(session, document.toBSONDocument())
+        } else {
+          internalCollection.insertOne(document.toBSONDocument())
+        }
       } catch (e: MongoServerException) {
         if (e.code == 11000 && e.message?.matches(Regex(".*E11000 duplicate key error collection: .* index: _id_ dup key:.*")) == true) {
           onDuplicateKey.invoke()
@@ -531,12 +659,20 @@ open class MongoDatabase(
     fun deleteOne(vararg filter: FilterPair): DeleteResult {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
       if (logAllQueries) println("deleteOne: ${filter.toFilterDocument().asJsonString()}")
-      return internalCollection.deleteOne(filter.toFilterDocument())
+      return if (session != null) {
+        internalCollection.deleteOne(session, filter.toFilterDocument())
+      } else {
+        internalCollection.deleteOne(filter.toFilterDocument())
+      }
     }
 
     fun deleteMany(vararg filter: FilterPair): DeleteResult {
       if (logAllQueries) println("deleteMany: ${filter.toFilterDocument().asJsonString()}")
-      return internalCollection.deleteMany(filter.toFilterDocument())
+      return if (session != null) {
+        internalCollection.deleteMany(session, filter.toFilterDocument())
+      } else {
+        internalCollection.deleteMany(filter.toFilterDocument())
+      }
     }
 
     /**
@@ -792,10 +928,6 @@ open class MongoDatabase(
   inner class SuspendingMongoCollection<Entry : MongoMainEntry>(
     val blockingCollection: MongoCollection<Entry>
   ) {
-    private suspend fun <R> runOnIo(block: suspend CoroutineScope.() -> R): R {
-      return withContext(Dispatchers.IO, block)
-    }
-
     val name: String get() = blockingCollection.name
     val entryClass: KClass<Entry> get() = blockingCollection.entryClass
 
@@ -980,6 +1112,10 @@ open class MongoDatabase(
         }
         .build()
         .let { MongoClients.create(it) }
+    }
+
+    private suspend fun <R> runOnIo(block: suspend CoroutineScope.() -> R): R {
+      return withContext(Dispatchers.IO, block)
     }
   }
 }
