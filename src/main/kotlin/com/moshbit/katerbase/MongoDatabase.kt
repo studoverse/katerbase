@@ -76,7 +76,7 @@ open class MongoDatabase(
    * See https://www.mongodb.com/docs/manual/core/transactions/ for more info and examples.
    */
   suspend fun executeTransaction(action: suspend (database: TransactionalDatabase) -> Unit) {
-    require(supportChangeStreams) { "supportChangeStreams must be true for the executeTransaction() operation" }
+    require(supportChangeStreams) { "supportChangeStreams must be true for the executeTransaction() operation, transactions are only supported on replica sets." }
     val transactionalDatabase = runOnIo { TransactionalDatabase() }
 
     // Sessions time out after 30 minutes, but close it now to save resources
@@ -87,9 +87,7 @@ open class MongoDatabase(
         action(transactionalDatabase)
         runOnIo { session.commitTransaction() }
       } catch (throwable: Throwable) {
-        runOnIo {
-          runOnIo { session.abortTransaction() } // Do not commit transaction to DB in case of exception.
-        }
+        runOnIo { session.abortTransaction() } // Do not commit transaction to DB in case of exception.
         throw throwable
       }
     }
@@ -277,7 +275,7 @@ open class MongoDatabase(
      * Operation types: https://www.mongodb.com/docs/manual/reference/change-events/
      */
     fun watch(pipeline: Document = defaultWatchPipeline, action: (Result<PayloadChange<Entry>>) -> Unit) {
-      require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation" }
+      require(supportChangeStreams) { "supportChangeStreams must be true for the watch() operation, change streams are only supported on replica sets." }
 
       val internalCollection = changeStreamCollections.getValue(entryClass).internalCollection
 

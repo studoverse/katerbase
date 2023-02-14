@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test
 class ReplicaSetDatabaseTests {
 
   @Test
-  fun transactionTest() = runBlocking {
+  fun transactionSingleCollectionTest() = runBlocking {
     val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
 
     Assertions.assertEquals(0, collection.count(EnumMongoPayload::long equal 42))
@@ -25,9 +25,48 @@ class ReplicaSetDatabaseTests {
 
       Assertions.assertEquals(2, transactionalCollection.count(EnumMongoPayload::long equal 42))
       Assertions.assertEquals(0, collection.count(EnumMongoPayload::long equal 42))
+
+      collection.insertOne(EnumMongoPayload().apply { _id = "3"; long = 42 }, upsert = true)
+      Assertions.assertEquals(2, transactionalCollection.count(EnumMongoPayload::long equal 42))
+      Assertions.assertEquals(1, collection.count(EnumMongoPayload::long equal 42))
     }
 
-    Assertions.assertEquals(2, collection.count(EnumMongoPayload::long equal 42))
+    Assertions.assertEquals(3, collection.count(EnumMongoPayload::long equal 42))
+  }
+
+  @Test
+  fun transactionMultiCollectionTest() = runBlocking {
+    val collection1 = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
+    val collection2 = testDb.getSuspendingCollection<SimpleMongoPayload>().apply { clear() }
+
+    Assertions.assertEquals(0, collection1.count(EnumMongoPayload::long equal 42))
+    Assertions.assertEquals(0, collection2.count(SimpleMongoPayload::string equal "42"))
+
+    testDb.executeTransaction { database ->
+      val transactionalCollection1 = database.getSuspendingCollection<EnumMongoPayload>()
+      val transactionalCollection2 = database.getSuspendingCollection<SimpleMongoPayload>()
+
+      transactionalCollection1.insertOne(EnumMongoPayload().apply { _id = "1"; long = 42 }, upsert = true)
+      transactionalCollection1.insertOne(EnumMongoPayload().apply { _id = "2"; long = 42 }, upsert = true)
+      transactionalCollection2.insertOne(SimpleMongoPayload().apply { _id = "1"; string = "42" }, upsert = true)
+      transactionalCollection2.insertOne(SimpleMongoPayload().apply { _id = "2"; string = "42" }, upsert = true)
+
+      Assertions.assertEquals(2, transactionalCollection1.count(EnumMongoPayload::long equal 42))
+      Assertions.assertEquals(0, collection1.count(EnumMongoPayload::long equal 42))
+      Assertions.assertEquals(2, transactionalCollection2.count(SimpleMongoPayload::string equal "42"))
+      Assertions.assertEquals(0, collection2.count(SimpleMongoPayload::string equal "42"))
+
+      collection1.insertOne(EnumMongoPayload().apply { _id = "3"; long = 42 }, upsert = true)
+      collection2.insertOne(SimpleMongoPayload().apply { _id = "3"; string = "42" }, upsert = true)
+
+      Assertions.assertEquals(2, transactionalCollection1.count(EnumMongoPayload::long equal 42))
+      Assertions.assertEquals(1, collection1.count(EnumMongoPayload::long equal 42))
+      Assertions.assertEquals(2, transactionalCollection2.count(SimpleMongoPayload::string equal "42"))
+      Assertions.assertEquals(1, collection2.count(SimpleMongoPayload::string equal "42"))
+    }
+
+    Assertions.assertEquals(3, collection1.count(EnumMongoPayload::long equal 42))
+    Assertions.assertEquals(3, collection2.count(SimpleMongoPayload::string equal "42"))
   }
 
   companion object {
