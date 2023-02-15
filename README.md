@@ -386,25 +386,19 @@ Removes a collection from the database. As long as Katerbase is not initialized 
 
 Calls [deleteMany](#deletemany) with no arguments, so all documents in the collection will be deleted.
 
-
 ## Other operators
 
 ### aggregate
+
 `fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T>`
 
 [db.collection.aggregate](https://docs.mongodb.com/manual/reference/method/db.collection.aggregate/) MongoDB operation
 
-In case `T` can't be reified, pass the `entryClass` to the overloaded function `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T>`.
+In case `T` can't be reified, pass the `entryClass` to the overloaded
+function `fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T>`.
 
-`aggregate` is currently in an experimental state.
+Use `pipeline` to start a new aggregation. The following operators are currently supported:
 
-
-### watch
-`fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), action: (PayloadChange<Entry>) -> Unit)`
-
-Watch only works if MongoDB is a replica set. Use `ignoredFields` to exclude a set of fields, if any change occurs to these fields it will be ignored.
-
-Use `aggregationPipeline` to start a new aggregation. The following operators are currently supported:
 * match
 * group
 * project
@@ -415,8 +409,49 @@ Use `aggregationPipeline` to start a new aggregation. The following operators ar
 
 `aggregate` is currently in an experimental state.
 
+### watch
+
+`fun watch(ignoredFields: List<MongoEntryField<*>> = emptyList(), action: (PayloadChange<Entry>) -> Unit)`
+
+Watch only works if MongoDB is a replica set. Use `ignoredFields` to exclude a set of fields, if any change occurs to these fields it will
+be ignored.
+
+`watch` is currently in an experimental state.
+
+### Transactions
+
+`suspend fun executeTransaction(action: suspend (database: TransactionalDatabase) -> Unit)`
+
+Use `executeTransaction` to execute [ACID transactions](https://www.mongodb.com/basics/acid-transactions) across one or multiple
+collections.
+
+```kotlin
+testDb.executeTransaction { database ->
+  val transactionalCollection = database.getSuspendingCollection<EnumMongoPayload>()
+
+  transactionalCollection.insertOne(EnumMongoPayload().apply { _id = "1"; long = 42 }, upsert = true)
+}
+```
+
+```kotlin
+testDb.executeTransaction { database ->
+  val transactionalCollection = database.getSuspendingCollection<EnumMongoPayload>()
+
+  transactionalCollection.insertOne(EnumMongoPayload().apply { _id = "1"; long = 42 }, upsert = true)
+
+  if (checkForSomeErrorState()) {
+    throw IllegalStateException() // Transaction will be aborted.
+  }
+}
+```
+
+The transaction is automatically committed if `action` runs successfully. If `action` throws an exception, the transaction is aborted.
+
+You can read more about the transaction behavior of
+MongoDB [here](https://www.mongodb.com/docs/manual/reference/method/Session.startTransaction/#behavior) .
 
 ## Filter operators
+
 * equal
 * notEqual
 * contains
