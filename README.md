@@ -416,8 +416,6 @@ Use `pipeline` to start a new aggregation. The following operators are currently
 Watch only works if MongoDB is a replica set. Use `ignoredFields` to exclude a set of fields, if any change occurs to these fields it will
 be ignored.
 
-`watch` is currently in an experimental state.
-
 ### Transactions
 
 `suspend fun executeTransaction(action: suspend (database: TransactionalDatabase) -> Unit)`
