@@ -637,6 +637,30 @@ class SuspendingDatabaseTests {
     assertEquals(EnumMongoPayload().stringList, collection.find().selectedFields(EnumMongoPayload::long).toList().first().stringList)
   }
 
+  @Test
+  fun nameEscapeTest(): Unit = runBlocking {
+    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val id = "nameEscapeTest"
+
+    collection.insertOne(EnumMongoPayload().apply { _id = id }, upsert = false)
+
+    assertThrows(IllegalArgumentException::class.java) {
+      runBlocking {
+        collection.updateOne(EnumMongoPayload::_id equal id) {
+          EnumMongoPayload::map.child("test.test") setTo ""
+        }
+      }
+    }
+
+    assertThrows(IllegalArgumentException::class.java) {
+      runBlocking {
+        collection.updateOne(EnumMongoPayload::_id equal id) {
+          EnumMongoPayload::map.child("\$test") setTo ""
+        }
+      }
+    }
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 

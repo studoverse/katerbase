@@ -158,11 +158,17 @@ private class FakeProperty<T, R>(override val name: String) : KProperty1<T, R> {
 }
 
 class MongoField(val name: String) {
-  fun extend(name: String) = MongoField(this.name + '.' + name)
-  fun extendWithCursor(name: String) = MongoField(this.name + ".$." + name)
+  fun extend(name: String) = MongoField(this.name + '.' + name.also { checkFieldName(it) })
+  fun extendWithCursor(name: String) = MongoField(this.name + ".$." + name.also { checkFieldName(it) })
 
   fun <Class, Type> toProperty(): KProperty1<Class, Type> = FakeProperty(name)
   val fieldName: String get() = name.takeLastWhile { it != '.' }
+
+  // https://jira.mongodb.org/browse/SERVER-3229
+  private fun checkFieldName(name: String) {
+    require("." !in name) { "MongoDB field names cannot contain a '.'" }
+    require(!name.startsWith("$")) { "MongoDB field names cannot start with a '$'" }
+  }
 
   override fun equals(other: Any?): Boolean = (other as? MongoField)?.name == name
   override fun hashCode(): Int = name.hashCode()
