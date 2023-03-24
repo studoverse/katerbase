@@ -166,7 +166,7 @@ class MongoField(val name: String) {
 
   // https://jira.mongodb.org/browse/SERVER-3229
   private fun checkFieldName(name: String) {
-    require("." !in name) { "MongoDB field names cannot contain a '.'" }
+    require("." !in name) { "MongoDB field names cannot contain a '.'" } // MongoDB treats a dot as "child field" delimiter
     require(!name.startsWith("$")) { "MongoDB field names cannot start with a '$'" } // MongoDB operators start with a dollar sign
   }
 
