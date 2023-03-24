@@ -50,26 +50,23 @@ open class MongoDatabase(
   autoDeleteIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
-) {
+) : AbstractMongoDatabase() {
   protected val client: MongoClient
   protected val internalDatabase: com.mongodb.client.MongoDatabase
   protected val mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
   protected val changeStreamClient: MongoClient?
   protected val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
 
-  open fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
+  open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
     return mongoCollections[entryClass] as? MongoCollection<T>
       ?: throw IllegalArgumentException("No collection exists for ${entryClass.simpleName}")
   }
 
-  inline fun <reified T : MongoMainEntry> getCollection() = getCollection(entryClass = T::class)
 
-  open fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
+  open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
     return SuspendingMongoCollection(blockingCollection = getCollection(entryClass))
   }
-
-  inline fun <reified T : MongoMainEntry> getSuspendingCollection() = getSuspendingCollection(entryClass = T::class)
 
   /**
    * Use the [TransactionalDatabase]s to modify the DB state in a transaction.
@@ -93,7 +90,7 @@ open class MongoDatabase(
     }
   }
 
-  inner class TransactionalDatabase {
+  inner class TransactionalDatabase : AbstractMongoDatabase() {
     val session: ClientSession = client.startSession(
       ClientSessionOptions.builder()
         .causallyConsistent(true)
@@ -113,12 +110,15 @@ open class MongoDatabase(
       indexes = emptyList(), // Indexes are already created so no need to declare them here.
     )
 
-    fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
+    override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
+      return TransactionalCollection(mongoCollection = this@MongoDatabase.getCollection(entryClass))
+    }
+
+    override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
       val transactionalCollection = TransactionalCollection(mongoCollection = this@MongoDatabase.getCollection(entryClass))
       return SuspendingMongoCollection(blockingCollection = transactionalCollection)
     }
 
-    inline fun <reified T : MongoMainEntry> getSuspendingCollection() = getSuspendingCollection(entryClass = T::class)
   }
 
   class DuplicateKeyException(key: String) : IllegalStateException("Duplicate key: $key was already in collection.")
