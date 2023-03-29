@@ -384,7 +384,7 @@ open class MongoDatabase(
 
       // Ensure indexes are not too long on older mongodb versions, see https://www.mongodb.com/docs/v4.0/reference/limits/#Index-Name-Length
       private fun String.ensureMaxIndexLength(): String {
-        val maxIndexLength = 128 - ".".length - internalDatabase.name.length
+        val maxIndexLength = 128 - internalCollection.namespace.fullName.length - ".\$".length
 
         return if (this.length > maxIndexLength) {
           val hashLength = 16
