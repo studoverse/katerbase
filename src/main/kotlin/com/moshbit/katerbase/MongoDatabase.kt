@@ -205,6 +205,13 @@ open class MongoDatabase(
 
     // Create and delete indexes in MongoDB
     mongoCollections.forEach { (_, collection) ->
+
+      // Validate that index names are unique, otherwise the below creation/dropping on indexes won't work
+      val indexNames = collection.indexes.map { it.indexName }
+      require(indexNames.toSet().size == indexNames.size) {
+        "Index names must be unique, but there are duplicates in ${collection.entryClass.simpleName}:\n${indexNames.joinToString("\n")}"
+      }
+
       val existingIndexes = collection.internalCollection.listIndexes().toList().map { it["name"] as String }
 
       if (autoDeleteIndexes) {
@@ -372,7 +379,22 @@ open class MongoDatabase(
           ?.joinToString(separator = "_", transform = { it.toString() })
           ?.let { suffix -> "_$suffix" } ?: ""
 
-        indexName = baseName + partialSuffix
+        this.indexName = (baseName + partialSuffix).ensureMaxIndexLength()
+      }
+
+      // Ensure indexes are not too long on older mongodb versions, see https://www.mongodb.com/docs/v4.0/reference/limits/#Index-Name-Length
+      private fun String.ensureMaxIndexLength(): String {
+        val maxIndexLength = 128 - ".".length - internalDatabase.name.length
+
+        return if (this.length > maxIndexLength) {
+          val hashLength = 16
+          val hashDelimiter = "-"
+          // Append original indexName hash, so we probably don't have 2 indexes with the same name.
+          // We still check for duplicates when we created all indexes, so hash collisions won't cause index problems.
+          this.take(maxIndexLength - hashLength - hashDelimiter.length) + hashDelimiter + this.sha256().take(hashLength)
+        } else {
+          this
+        }
       }
 
       fun createIndex(): String? = internalCollection.createIndex(bson, IndexOptions()
