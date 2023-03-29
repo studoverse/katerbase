@@ -113,6 +113,12 @@ class MoviesExample {
         collection<User>("users") {
           index(User::email.ascending(), indexOptions = { unique(true) })
           index(User::ratings.child(User.MovieRating::date).ascending())
+          index(
+            User::email.ascending(), partialIndex = arrayOf(
+              User::email equal "$._()=@!\"'#*+-.,;:_^°§$%&/()very-long-index-name-with-special-chars-that-needs-to-be-cropped-" +
+                  "because-mongodb-namespaces-can-only-be-128-chars-long-on-older-mongodb-versions"
+            )
+          )
         }
         collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
       }
