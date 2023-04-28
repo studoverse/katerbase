@@ -620,5 +620,10 @@ A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "a
 All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined` the behavior described in [additional Kotlin field](#additional-kotlin-field) applies. If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0`/`0.0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
 
 
+#### Open classes entities
+
+Originally, MongoDB (child-)object entities cannot be open classes such as Sealed classes. However, at the moment we can have a sealed class MongoDb entity by adding `@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS` before the class declaration (This annotation is used to serialize information about actual class of polymorphic instances).
+
+
 ## Project state
 Katerbase evolved from a few extensions functions that were created in December 2016 to a bunch of internally used MongoDB utility functions. The utility functions are currently used at [Moshbit](https://moshbit.com) in several projects. In 2019, we decided to create a standalone library out of the proofed mongo-java-driver wrapper functions. The library design was adapted several times to provide the goal of Katerbase: Writing concise and simple MongoDB queries without any boilerplate or ceremony. Many thanks to [@functionaldude](https://github.com/functionaldude) for all the long design discussions that lead into the current state of the project.
