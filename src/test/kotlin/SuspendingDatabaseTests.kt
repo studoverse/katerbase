@@ -661,6 +661,31 @@ class SuspendingDatabaseTests {
     }
   }
 
+  @Test
+  fun openClassTest(): Unit = runBlocking {
+    val id = "openClassTest"
+    val sealedClass1Test = OpenClassMongoPayload.SealedClass.Class1(string = "string1")
+    val sealedClass2test = OpenClassMongoPayload.SealedClass.Class2(int = 20)
+    val payload = OpenClassMongoPayload().apply {
+      _id = id
+      sealedClass1 = sealedClass1Test
+      sealedClass2 = sealedClass2test
+    }
+    testDb.getSuspendingCollection<OpenClassMongoPayload>().insertOne(payload, upsert = true)
+
+    val simpleMongoPayload = testDb.getCollection<OpenClassMongoPayload>().findOne(OpenClassMongoPayload::_id equal id)
+    assertEquals(sealedClass1Test.string, (simpleMongoPayload!!.sealedClass1 as OpenClassMongoPayload.SealedClass.Class1).string)
+
+    val sealedClass2testUpdated = OpenClassMongoPayload.SealedClass.Class2(int = 100)
+    testDb.getCollection<OpenClassMongoPayload>().updateOne(OpenClassMongoPayload::_id equal id) {
+      OpenClassMongoPayload::sealedClass2 setTo sealedClass2testUpdated
+    }
+    val updatedMongoPayload = testDb.getCollection<OpenClassMongoPayload>().findOne(OpenClassMongoPayload::_id equal id)
+    assertEquals(sealedClass2testUpdated.int, (updatedMongoPayload!!.sealedClass2 as OpenClassMongoPayload.SealedClass.Class2).int)
+
+    testDb.getCollection<OpenClassMongoPayload>().deleteOne(OpenClassMongoPayload::_id equal id)
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 
@@ -680,6 +705,7 @@ class SuspendingDatabaseTests {
         }
         collection<SimpleMongoPayload>("simpleMongoColl")
         collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
+        collection<OpenClassMongoPayload>("simpleMongoColl")
       }
     }
   }
