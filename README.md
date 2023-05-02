@@ -620,9 +620,9 @@ A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "a
 All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined` the behavior described in [additional Kotlin field](#additional-kotlin-field) applies. If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0`/`0.0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
 
 
-#### Open classes entities
+#### Open classes / sealed classes
 
-Originally, MongoDB (child-)object entities cannot be open classes such as Sealed classes. However, at the moment we can have a sealed class MongoDb entity by adding `@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS` before the class declaration (This annotation is used to serialize information about actual class of polymorphic instances).
+At the moment, you can create an open/sealed MongoDb class entity by adding `@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS` before the class declaration. This annotation is used to serialize information about the actual class of polymorphic instances. Jackson will then deserialize the class accordingly.
 
 
 ## Project state
