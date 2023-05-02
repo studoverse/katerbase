@@ -1,4 +1,6 @@
+import com.fasterxml.jackson.annotation.JsonTypeInfo
 import com.moshbit.katerbase.MongoMainEntry
+import com.moshbit.katerbase.MongoSubEntry
 import java.util.*
 
 class EnumMongoPayload(val value1: Enum1 = Enum1.VALUE1) : MongoMainEntry() {
@@ -32,4 +34,15 @@ class NullableSimpleMongoPayload : MongoMainEntry() {
   var double: Double? = null
   var string: String? = null
   var stringList: List<String?>? = null
+}
+
+class OpenClassMongoPayload: MongoMainEntry() {
+  @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS)
+  sealed class SealedClass : MongoSubEntry() {
+    class Class1(val string: String): SealedClass()
+    class Class2(val int: Int): SealedClass()
+  }
+
+  var sealedClass1: SealedClass = SealedClass.Class1(string = "")
+  var sealedClass2: SealedClass = SealedClass.Class2(int = 0)
 }
