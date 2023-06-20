@@ -4,7 +4,8 @@ import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
-import util.*
+import util.addYears
+import util.forEachAsync
 import java.util.*
 
 // Keep BlockingDatabaseTests and SuspendingDatabaseTests in sync, and only change getCollection with getSuspendingCollection
@@ -629,6 +630,23 @@ class BlockingDatabaseTests {
 
     assertEquals(longInsertedValue, collection.find().selectedFields(EnumMongoPayload::long).toList().first().long)
     assertEquals(EnumMongoPayload().stringList, collection.find().selectedFields(EnumMongoPayload::long).toList().first().stringList)
+  }
+
+  @Test
+  fun testUpdateOneOrInsert() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testUpdateOneOrInsert"
+    assertEquals(0, collection.find().count())
+
+    repeat(10) { count ->
+      collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+        EnumMongoPayload::stringList push count.toString()
+      }
+      assertEquals(1, collection.find().count())
+      val document = collection.find().first()
+      assertEquals(id, document._id)
+      assertEquals((0..count).map { it.toString() }, document.stringList)
+    }
   }
 
   companion object {
