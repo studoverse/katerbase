@@ -1,12 +1,14 @@
 import com.moshbit.katerbase.*
 import kotlinx.coroutines.flow.count
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
-import util.*
+import util.addYears
+import util.forEachAsyncCoroutine
 import java.util.*
 
 // Keep BlockingDatabaseTests and SuspendingDatabaseTests in sync, and only change getSuspendingCollection with getSuspendingCollection
@@ -635,6 +637,23 @@ class SuspendingDatabaseTests {
 
     assertEquals(longInsertedValue, collection.find().selectedFields(EnumMongoPayload::long).toList().first().long)
     assertEquals(EnumMongoPayload().stringList, collection.find().selectedFields(EnumMongoPayload::long).toList().first().stringList)
+  }
+
+  @Test
+  fun testUpdateOneOrInsert(): Unit = runBlocking {
+    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testUpdateOneOrInsert"
+    assertEquals(0, collection.find().count())
+
+    repeat(10) { count ->
+      collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+        EnumMongoPayload::stringList push count.toString()
+      }
+      assertEquals(1, collection.find().count())
+      val document = collection.find().first()
+      assertEquals(id, document._id)
+      assertEquals((0..count).map { it.toString() }, document.stringList)
+    }
   }
 
   @Test
