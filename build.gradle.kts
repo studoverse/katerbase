@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   `maven-publish`
-  kotlin("jvm") version "1.8.10"
+  kotlin("jvm") version "1.9.0"
 }
 
 group = "com.moshbit.katerbase"
