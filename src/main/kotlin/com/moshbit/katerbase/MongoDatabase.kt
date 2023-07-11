@@ -183,8 +183,9 @@ open class MongoDatabase(
 
     if (autoCreateCollections) {
       // Create collections which don't exist
+      val existingCollections = internalDatabase.listCollectionNames().toSet()
       val newCollections = databaseDefinition.collections
-        .filter { it.collectionName !in internalDatabase.listCollectionNames() }
+        .filter { it.collectionName !in existingCollections }
 
       if (newCollections.isNotEmpty()) {
         println("Creating ${newCollections.size} new collections:")
