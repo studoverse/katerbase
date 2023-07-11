@@ -705,6 +705,39 @@ class SuspendingDatabaseTests {
     testDb.getCollection<OpenClassMongoPayload>().deleteOne(OpenClassMongoPayload::_id equal id)
   }
 
+  @Test
+  fun findEquality(): Unit = runBlocking {
+    with(testDb.getSuspendingCollection<EnumMongoPayload>()) {
+
+      assertEquals(find(), find())
+      assertEquals(find().hashCode(), find().hashCode())
+
+      assertNotEquals(find().limit(1), find())
+      assertNotEquals(find().limit(1).hashCode(), find().hashCode())
+
+      assertNotEquals(find().skip(1), find())
+      assertNotEquals(find().skip(1).hashCode(), find().hashCode())
+
+      assertNotEquals(find().batchSize(1), find())
+      assertNotEquals(find().batchSize(1).hashCode(), find().hashCode())
+
+      assertNotEquals(find().selectedFields(EnumMongoPayload::double), find())
+      assertNotEquals(find().selectedFields(EnumMongoPayload::double).hashCode(), find().hashCode())
+
+      assertNotEquals(find().sortBy(EnumMongoPayload::double), find())
+      assertNotEquals(find().sortBy(EnumMongoPayload::double).hashCode(), find().hashCode())
+
+      assertNotEquals(find().sortBy(EnumMongoPayload::double), find().sortByDescending(EnumMongoPayload::double))
+      assertNotEquals(find().sortBy(EnumMongoPayload::double).hashCode(), find().sortByDescending(EnumMongoPayload::double).hashCode())
+
+      assertNotEquals(find().hint("value1_1_date_1"), find())
+      assertNotEquals(find().hint("value1_1_date_1").hashCode(), find().hashCode())
+
+      assertNotEquals(find(EnumMongoPayload::_id equal ""), find())
+      assertNotEquals(find(EnumMongoPayload::_id equal "").hashCode(), find().hashCode())
+    }
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 
