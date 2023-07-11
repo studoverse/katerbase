@@ -3,10 +3,6 @@ package com.moshbit.katerbase
 import ch.qos.logback.classic.Level
 import com.mongodb.*
 import com.mongodb.bulk.BulkWriteResult
-import com.mongodb.client.ClientSession
-import com.mongodb.client.FindIterable
-import com.mongodb.client.MongoClient
-import com.mongodb.client.MongoClients
 import com.mongodb.client.model.*
 import com.mongodb.client.model.changestream.ChangeStreamDocument
 import com.mongodb.client.model.changestream.FullDocument
@@ -14,16 +10,53 @@ import com.mongodb.client.model.changestream.OperationType
 import com.mongodb.client.result.DeleteResult
 import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import com.mongodb.kotlin.client.coroutine.ClientSession
+import com.mongodb.kotlin.client.coroutine.DistinctFlow
+import com.mongodb.kotlin.client.coroutine.FindFlow
+import com.mongodb.kotlin.client.coroutine.MongoClient
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.toSet
+import kotlinx.coroutines.launch
 import org.bson.*
 import org.bson.conversions.Bson
 import java.util.*
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import kotlin.collections.LinkedHashMap
+import kotlin.collections.List
+import kotlin.collections.Map
+import kotlin.collections.MutableList
+import kotlin.collections.MutableMap
+import kotlin.collections.Set
+import kotlin.collections.associateBy
+import kotlin.collections.component1
+import kotlin.collections.component2
+import kotlin.collections.emptyList
+import kotlin.collections.emptyMap
+import kotlin.collections.filter
+import kotlin.collections.first
+import kotlin.collections.forEach
+import kotlin.collections.getOrPut
+import kotlin.collections.getValue
+import kotlin.collections.isEmpty
+import kotlin.collections.isNotEmpty
+import kotlin.collections.joinToString
+import kotlin.collections.listOf
+import kotlin.collections.map
+import kotlin.collections.mapOf
+import kotlin.collections.mutableListOf
+import kotlin.collections.none
+import kotlin.collections.plus
+import kotlin.collections.set
+import kotlin.collections.singleOrNull
+import kotlin.collections.toList
+import kotlin.collections.toMap
+import kotlin.collections.toSet
+import kotlin.collections.toTypedArray
 import kotlin.concurrent.thread
 import kotlin.math.absoluteValue
 import kotlin.reflect.KClass
@@ -40,32 +73,19 @@ import kotlin.reflect.KMutableProperty1
  * 7) Check if it worked using Studio 3t or just type "mongo" to open the mongo shell.
  */
 
-open class MongoDatabase(
-  uri: String,
-  allowReadFromSecondaries: Boolean = false,
-  useMajorityWrite: Boolean = allowReadFromSecondaries,
-  private val supportChangeStreams: Boolean = false,
-  autoCreateCollections: Boolean = true,
-  autoCreateIndexes: Boolean = true,
-  autoDeleteIndexes: Boolean = true,
-  clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
-  collections: MongoDatabaseDefinition.() -> Unit
+open class MongoDatabase private constructor(
+  val supportChangeStreams: Boolean,
 ) : AbstractMongoDatabase() {
-  protected val client: MongoClient
-  protected val internalDatabase: com.mongodb.client.MongoDatabase
-  protected val mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
-  protected val changeStreamClient: MongoClient?
-  protected val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected lateinit var client: MongoClient
+  protected lateinit var internalDatabase: com.mongodb.kotlin.client.coroutine.MongoDatabase
+  protected lateinit var mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected var changeStreamClient: MongoClient? = null
+  protected lateinit var changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
 
   open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
     return mongoCollections[entryClass] as? MongoCollection<T>
       ?: throw IllegalArgumentException("No collection exists for ${entryClass.simpleName}")
-  }
-
-
-  open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
-    return SuspendingMongoCollection(blockingCollection = getCollection(entryClass))
   }
 
   /**
@@ -74,34 +94,36 @@ open class MongoDatabase(
    */
   suspend fun executeTransaction(action: suspend (database: TransactionalDatabase) -> Unit) {
     require(supportChangeStreams) { "supportChangeStreams must be true for the executeTransaction() operation, transactions are only supported on replica sets." }
-    val transactionalDatabase = runOnIo { TransactionalDatabase() }
+    val transactionalDatabase = TransactionalDatabase().apply {
+      session = client.startSession(
+        ClientSessionOptions.builder()
+          .causallyConsistent(true)
+          .snapshot(false)
+          .defaultTransactionOptions(
+            TransactionOptions.builder()
+              .readPreference(ReadPreference.primary())
+              .build()
+          )
+          .build()
+      )
+    }
 
     // Sessions time out after 30 minutes, but close it now to save resources
     // https://www.mongodb.com/docs/manual/reference/command/startSession/
     transactionalDatabase.session.use { session ->
-      runOnIo { session.startTransaction() }
+      session.startTransaction()
       try {
         action(transactionalDatabase)
-        runOnIo { session.commitTransaction() }
+        session.commitTransaction()
       } catch (throwable: Throwable) {
-        runOnIo { session.abortTransaction() } // Do not commit transaction to DB in case of exception.
+        session.abortTransaction() // Do not commit transaction to DB in case of exception.
         throw throwable
       }
     }
   }
 
   inner class TransactionalDatabase : AbstractMongoDatabase() {
-    val session: ClientSession = client.startSession(
-      ClientSessionOptions.builder()
-        .causallyConsistent(true)
-        .snapshot(false)
-        .defaultTransactionOptions(
-          TransactionOptions.builder()
-            .readPreference(ReadPreference.primary())
-            .build()
-        )
-        .build()
-    )
+    lateinit var session: ClientSession
 
     inner class TransactionalCollection<Entry : MongoMainEntry>(mongoCollection: MongoCollection<Entry>) : MongoCollection<Entry>(
       internalCollection = mongoCollection.internalCollection,
@@ -113,22 +135,25 @@ open class MongoDatabase(
     override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
       return TransactionalCollection(mongoCollection = this@MongoDatabase.getCollection(entryClass))
     }
-
-    override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
-      val transactionalCollection = TransactionalCollection(mongoCollection = this@MongoDatabase.getCollection(entryClass))
-      return SuspendingMongoCollection(blockingCollection = transactionalCollection)
-    }
-
   }
 
   class DuplicateKeyException(key: String) : IllegalStateException("Duplicate key: $key was already in collection.")
 
-  fun getDatabaseStats(): DatabaseStats {
+  suspend fun getDatabaseStats(): DatabaseStats {
     val commandResult = internalDatabase.runCommand(Document(mapOf("dbStats" to 1, "scale" to 1)))
     return JsonHandler.fromBson(commandResult, DatabaseStats::class)
   }
 
-  init {
+  suspend fun init(
+    uri: String,
+    allowReadFromSecondaries: Boolean = false,
+    useMajorityWrite: Boolean = allowReadFromSecondaries,
+    autoCreateCollections: Boolean = true,
+    autoCreateIndexes: Boolean = true,
+    autoDeleteIndexes: Boolean = true,
+    clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
+    collections: MongoDatabaseDefinition.() -> Unit
+  ) {
     // Disable mongo driver logging
     setLogLevel("org.mongodb", Level.ERROR)
 
@@ -221,7 +246,8 @@ open class MongoDatabase(
           .filter { indexName -> indexName != "_id_" } // Never drop _id
           .filter { indexName -> collection.indexes.none { index -> index.indexName == indexName } }
           .forEach { indexName ->
-            thread {
+            @OptIn(DelicateCoroutinesApi::class) // Don't wait until indexes get dropped, it might take a while
+            GlobalScope.launch {
               collection.internalCollection.dropIndex(indexName)
               println("Successfully dropped index $indexName")
             }
@@ -236,7 +262,8 @@ open class MongoDatabase(
         collection.indexes
           .filter { index -> index.indexName !in existingIndexes }
           .forEach { index ->
-            thread {
+            @OptIn(DelicateCoroutinesApi::class) // Don't wait until indexes get created, it might take a while
+            GlobalScope.launch {
               // Don't wait for this, application can be started without the indexes
               println("Creating index ${index.indexName} ...")
               index.createIndex()
@@ -266,7 +293,7 @@ open class MongoDatabase(
 
   // Mongo collection wrapper for Kotlin
   open inner class MongoCollection<Entry : MongoMainEntry>(
-    val internalCollection: com.mongodb.client.MongoCollection<Document>,
+    val internalCollection: com.mongodb.kotlin.client.coroutine.MongoCollection<Document>,
     val entryClass: KClass<Entry>,
     val session: ClientSession? = null,
     indexes: List<MongoDatabaseDefinition.Collection.Index>,
@@ -298,7 +325,8 @@ open class MongoDatabase(
         }
       }
 
-      thread(isDaemon = true, name = "katerbase-watch-${name}-${Random().nextInt().absoluteValue}") {
+      @OptIn(DelicateCoroutinesApi::class) // Global watch coroutine
+      GlobalScope.launch(CoroutineName("katerbase-watch-${name}-${Random().nextInt().absoluteValue}")) {
         fun watch() = if (session != null) {
           internalCollection.watch(session, listOf(pipeline))
         } else {
@@ -309,13 +337,12 @@ open class MongoDatabase(
           try {
             watch()
               .apply { fullDocument(FullDocument.UPDATE_LOOKUP) }
-              .iterator() // Calling the iterator actually executes the query on the DB server.
               .also {
                 // Query has been executed, so now it's safe to return for the watch function.
                 // This makes sure that when watch returns, changes are already coming in.
                 watchStartedSemaphore?.release()
               }
-              .forEach { document: ChangeStreamDocument<Document> ->
+              .collect { document: ChangeStreamDocument<Document> ->
                 val change = PayloadChange(
                   _id = (document.documentKey!!["_id"] as BsonString).value,
                   payload = document.fullDocument?.let { JsonHandler.fromBson(it, entryClass) },
@@ -399,7 +426,7 @@ open class MongoDatabase(
         }
       }
 
-      fun createIndex(): String? = internalCollection.createIndex(bson, IndexOptions()
+      suspend fun createIndex(): String = internalCollection.createIndex(bson, IndexOptions()
         .background(true)
         .apply {
           if (partialIndex != null) {
@@ -418,15 +445,15 @@ open class MongoDatabase(
       return this.toMongoField().extend(property.name).toProperty()
     }
 
-    fun drop() {
+    suspend fun drop() {
       internalCollection.drop()
     }
 
-    fun clear(): DeleteResult {
+    suspend fun clear(): DeleteResult {
       return deleteMany()
     }
 
-    fun count(vararg filter: FilterPair): Long {
+    suspend fun count(vararg filter: FilterPair): Long {
       if (logAllQueries) println("count: ${filter.toFilterDocument().asJsonString()}")
       return when {
         session != null -> internalCollection.countDocuments(session, filter.toFilterDocument())
@@ -435,7 +462,7 @@ open class MongoDatabase(
       }
     }
 
-    fun bulkWrite(options: BulkWriteOptions = BulkWriteOptions(), action: BulkOperation.() -> Unit): BulkWriteResult {
+    suspend fun bulkWrite(options: BulkWriteOptions = BulkWriteOptions(), action: BulkOperation.() -> Unit): BulkWriteResult {
       val models = BulkOperation().apply { action(this) }.models
       if (models.isEmpty()) {
         // Acknowledge empty bulk write
@@ -449,7 +476,7 @@ open class MongoDatabase(
     }
 
     private fun Document.toClass() = JsonHandler.fromBson(this, entryClass)
-    private fun FindIterable<Document>.toClasses() = FindCursor(this, entryClass, this@MongoCollection)
+    private fun FindFlow<Document>.toClasses() = FlowFindCursor(this, entryClass, this@MongoCollection)
 
     // Returns a MongoDocument as a list of mutators. Useful if you want to set all values in an update block.
     // In case _id should be included in the mutator, set withId to true.
@@ -460,13 +487,13 @@ open class MongoDatabase(
 
     // Single operators
     @Deprecated("Use only for hacks", ReplaceWith("find"))
-    fun findDocuments(vararg filter: FilterPair): FindIterable<Document> {
+    fun findDocuments(vararg filter: FilterPair): FindFlow<Document> {
       return internalCollection.find(filter.toFilterDocument())
     }
 
-    fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T> {
-      return AggregateCursor(
-        mongoIterable = if (session != null) {
+    fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): FlowAggregateCursor<T> {
+      return FlowAggregateCursor(
+        aggregateFlow = if (session != null) {
           internalCollection.aggregate(
             /* clientSession = */ session,
             /* pipeline = */ pipeline.bson,
@@ -482,21 +509,21 @@ open class MongoDatabase(
       )
     }
 
-    inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T> {
+    inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): FlowAggregateCursor<T> {
       return aggregate(
         pipeline = aggregationPipeline(pipeline),
         entryClass = T::class
       )
     }
 
-    fun sample(size: Int): AggregateCursor<Entry> {
+    fun sample(size: Int): FlowAggregateCursor<Entry> {
       return aggregate(
         pipeline = aggregationPipeline { sample(size) },
         entryClass = entryClass
       )
     }
 
-    fun find(vararg filter: FilterPair): FindCursor<Entry> {
+    suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
       if (logAllQueries) println("find: ${filter.toFilterDocument().asJsonString()} (pipeline: ${filter.getExecutionPipeline()})")
       return if (session != null) {
         internalCollection.find(session, filter.toFilterDocument())
@@ -505,14 +532,14 @@ open class MongoDatabase(
       }.toClasses()
     }
 
-    fun findOne(vararg filter: FilterPair): Entry? {
+    suspend fun findOne(vararg filter: FilterPair): Entry? {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
       return find(*filter).limit(1).firstOrNull()
     }
 
     // Returns a document or inserts the document and then returns it.
     // This works atomically, so newEntry may be called even if the document exists
-    fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
+    suspend fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
 
       // This is a performance optimization, when using updateOneAndFind the document is locked
@@ -532,31 +559,28 @@ open class MongoDatabase(
      * Use this if you need a set of distinct specific value of a document
      * More info: https://docs.mongodb.com/manual/reference/method/db.collection.distinct/
      */
-    fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
-      return DistinctCursor(
-        mongoIterable = if (session != null) {
-          internalCollection.distinct(
-            /* clientSession = */ session,
-            /* fieldName = */ distinctField.name,
-            /* filter = */ filter.toFilterDocument(),
+    fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctFlow<T> {
+      return if (session != null) {
+        internalCollection.distinct(
+          /* clientSession = */ session,
+          /* fieldName = */ distinctField.name,
+          /* filter = */ filter.toFilterDocument(),
+          /* resultClass = */ entryClass.java
+        )
+      } else {
+        internalCollection.distinct(
+          /* fieldName = */ distinctField.name,
+          /* filter = */ filter.toFilterDocument(),
             /* resultClass = */ entryClass.java
           )
-        } else {
-          internalCollection.distinct(
-            /* fieldName = */ distinctField.name,
-            /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ entryClass.java
-          )
-        },
-        clazz = entryClass
-      )
+      }
     }
 
-    inline fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T> {
+    inline fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctFlow<T> {
       return distinct(distinctField, T::class, *filter)
     }
 
-    fun updateOne(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
+    suspend fun updateOne(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
       val mutator = UpdateOperation().apply { update(this) }.mutator
       if (mutator.isEmpty()) return UpdateResult.acknowledged(0, 0, null) // Due to if branches, we might end up with an "empty" update
@@ -573,7 +597,7 @@ open class MongoDatabase(
       }
     }
 
-    fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
+    suspend fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
       require(filter.key.name == "_id") {
         "An _id filter must be provided when interacting with only one object and no other filters are allowed to mitigate a DuplicateKeyException on update."
       }
@@ -595,7 +619,7 @@ open class MongoDatabase(
       }
     }
 
-    fun updateOneAndFind(
+    suspend fun updateOneAndFind(
       vararg filter: FilterPair,
       upsert: Boolean = false,
       returnDocument: ReturnDocument = ReturnDocument.AFTER,
@@ -623,7 +647,7 @@ open class MongoDatabase(
       }
     }
 
-    fun updateMany(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
+    suspend fun updateMany(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult {
       val mutator = UpdateOperation().apply { update(this) }.mutator
       if (mutator.isEmpty()) return UpdateResult.acknowledged(0, 0, null) // Due to if branches, we might end up with an "empty" update
       if (logAllQueries) println(buildString {
@@ -640,7 +664,7 @@ open class MongoDatabase(
     }
 
     /** Throws on duplicate key when upsert=false */
-    fun insertOne(document: Entry, upsert: Boolean): Any /* InsertOneResult | UpdateResult */ {
+    suspend fun insertOne(document: Entry, upsert: Boolean): Any /* InsertOneResult | UpdateResult */ {
       return if (upsert) {
         retryMongoOperationOnDuplicateKeyError {
           if (session != null) {
@@ -663,7 +687,7 @@ open class MongoDatabase(
       }
     }
 
-    fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
+    suspend fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
       try {
         return if (session != null) {
           internalCollection.insertOne(session, document.toBSONDocument())
@@ -680,7 +704,7 @@ open class MongoDatabase(
       }
     }
 
-    fun deleteOne(vararg filter: FilterPair): DeleteResult {
+    suspend fun deleteOne(vararg filter: FilterPair): DeleteResult {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
       if (logAllQueries) println("deleteOne: ${filter.toFilterDocument().asJsonString()}")
       return if (session != null) {
@@ -690,7 +714,7 @@ open class MongoDatabase(
       }
     }
 
-    fun deleteMany(vararg filter: FilterPair): DeleteResult {
+    suspend fun deleteMany(vararg filter: FilterPair): DeleteResult {
       if (logAllQueries) println("deleteMany: ${filter.toFilterDocument().asJsonString()}")
       return if (session != null) {
         internalCollection.deleteMany(session, filter.toFilterDocument())
@@ -707,7 +731,7 @@ open class MongoDatabase(
      * See https://jira.mongodb.org/browse/SERVER-14322 for more information on the specific supported and unsupported
      * operations
      */
-    private fun <T> retryMongoOperationOnDuplicateKeyError(tries: Int = 2, operation: () -> T): T {
+    private suspend fun <T> retryMongoOperationOnDuplicateKeyError(tries: Int = 2, operation: suspend () -> T): T {
       return try {
         operation()
       } catch (e: MongoServerException) {
@@ -921,9 +945,9 @@ open class MongoDatabase(
       }
     }
 
-    private fun Array<out FilterPair>.getExecutionPipeline(): String = getQueryStats(filter = this).executionPipelineString
+    private suspend fun Array<out FilterPair>.getExecutionPipeline(): String = getQueryStats(filter = this).executionPipelineString
 
-    fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
+    suspend fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
       val explainCommand = Document().apply {
         put("explain", Document().apply {
           put("find", name)
@@ -949,144 +973,36 @@ open class MongoDatabase(
     }
   }
 
-  inner class SuspendingMongoCollection<Entry : MongoMainEntry>(
-    val blockingCollection: MongoCollection<Entry>
-  ) {
-    val name: String get() = blockingCollection.name
-    val entryClass: KClass<Entry> get() = blockingCollection.entryClass
-
-    fun watch(pipeline: Document = defaultWatchPipeline, changeBufferCapacity: Int = 64): Channel<Result<PayloadChange<Entry>>> {
-      val channel = Channel<Result<PayloadChange<Entry>>>(changeBufferCapacity)
-
-      blockingCollection.watch(pipeline) { change ->
-        runBlocking { channel.send(change) }
-      }
-
-      return channel
-    }
-
-    suspend fun drop() {
-      runOnIo { blockingCollection.drop() }
-    }
-
-    suspend fun clear(): DeleteResult {
-      return runOnIo { blockingCollection.clear() }
-    }
-
-    suspend fun count(vararg filter: FilterPair): Long {
-      return runOnIo { blockingCollection.count(*filter) }
-    }
-
-    suspend fun bulkWrite(
-      options: BulkWriteOptions = BulkWriteOptions(),
-      action: MongoCollection<Entry>.BulkOperation.() -> Unit
-    ): BulkWriteResult {
-      return runOnIo { blockingCollection.bulkWrite(options, action) }
-    }
-
-    suspend fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): FlowAggregateCursor<T> {
-      return runOnIo { FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass)) }
-    }
-
-    suspend inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): FlowAggregateCursor<T> {
-      return aggregate(
-        pipeline = aggregationPipeline(pipeline),
-        entryClass = T::class
-      )
-    }
-
-    suspend fun sample(size: Int): FlowAggregateCursor<Entry> {
-      return aggregate(
-        pipeline = aggregationPipeline { sample(size) },
-        entryClass = entryClass
-      )
-    }
-
-    suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
-      return withContext(Dispatchers.IO) {
-        val cursor = blockingCollection.find(*filter)
-        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection)
-      }
-    }
-
-    suspend fun findOne(vararg filter: FilterPair): Entry? {
-      return runOnIo { blockingCollection.findOne(*filter) }
-    }
-
-    suspend fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
-      return runOnIo { blockingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
-    }
-
-    /**
-     * Use this if you need a set of distinct specific value of a document
-     * More info: https://docs.mongodb.com/manual/reference/method/db.collection.distinct/
-     */
-    suspend fun <T : Any> distinct(
-      distinctField: MongoEntryField<T>,
-      entryClass: KClass<T>,
-      vararg filter: FilterPair
-    ): FlowDistinctCursor<T> {
-      return runOnIo {
-        FlowDistinctCursor(
-          mongoIterable = blockingCollection.internalCollection.distinct(
-            /* fieldName = */ distinctField.name,
-            /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ entryClass.java
-          ),
-          clazz = entryClass
-        )
-      }
-    }
-
-    suspend inline fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): FlowDistinctCursor<T> {
-      return distinct(distinctField, T::class, *filter)
-    }
-
-    suspend fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { blockingCollection.updateOne(*filter, update = update) }
-    }
-
-    suspend fun updateOneOrInsert(filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { blockingCollection.updateOneOrInsert(filter, update = update) }
-    }
-
-    suspend fun updateOneAndFind(
-      vararg filter: FilterPair,
-      upsert: Boolean = false,
-      returnDocument: ReturnDocument = ReturnDocument.AFTER,
-      update: MongoCollection<Entry>.UpdateOperation.() -> Unit
-    ): Entry? {
-      return runOnIo { blockingCollection.updateOneAndFind(*filter, upsert = upsert, returnDocument = returnDocument, update = update) }
-    }
-
-    suspend fun updateMany(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { blockingCollection.updateMany(*filter, update = update) }
-    }
-
-    suspend fun insertOne(document: Entry, upsert: Boolean) {
-      return runOnIo { blockingCollection.insertOne(document, upsert) }
-    }
-
-    suspend fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
-      return runOnIo { blockingCollection.insertOne(document, onDuplicateKey) }
-    }
-
-    suspend fun deleteOne(vararg filter: FilterPair): DeleteResult {
-      return runOnIo { blockingCollection.deleteOne(*filter) }
-    }
-
-    suspend fun deleteMany(vararg filter: FilterPair): DeleteResult {
-      return runOnIo { blockingCollection.deleteMany(*filter) }
-    }
-
-    suspend fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
-      return runOnIo { blockingCollection.getQueryStats(*filter, limit = limit) }
-    }
-  }
-
   companion object {
     var logAllQueries = false // Set this to true if you want to debug your database queries
     private fun Document.asJsonString() = JsonHandler.toJsonString(this)
+
+    suspend fun create(
+      uri: String,
+      allowReadFromSecondaries: Boolean = false,
+      useMajorityWrite: Boolean = allowReadFromSecondaries,
+      supportChangeStreams: Boolean = false,
+      autoCreateCollections: Boolean = true,
+      autoCreateIndexes: Boolean = true,
+      autoDeleteIndexes: Boolean = true,
+      clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
+      collections: MongoDatabaseDefinition.() -> Unit
+    ): MongoDatabase {
+      return MongoDatabase(
+        supportChangeStreams = supportChangeStreams
+      ).apply {
+        init(
+          uri = uri,
+          allowReadFromSecondaries = allowReadFromSecondaries,
+          useMajorityWrite = useMajorityWrite,
+          autoCreateCollections = autoCreateCollections,
+          autoCreateIndexes = autoCreateIndexes,
+          autoDeleteIndexes = autoDeleteIndexes,
+          clientSettings = clientSettings,
+          collections = collections
+        )
+      }
+    }
 
     private val defaultWatchPipeline
       get() = Document().apply {
@@ -1135,11 +1051,7 @@ open class MongoDatabase(
           clientSettings?.invoke(this)
         }
         .build()
-        .let { MongoClients.create(it) }
-    }
-
-    private suspend fun <R> runOnIo(block: suspend CoroutineScope.() -> R): R {
-      return withContext(Dispatchers.IO, block)
+        .let { MongoClient.create(it) }
     }
   }
 }

@@ -11,31 +11,31 @@ import util.addYears
 import util.forEachAsyncCoroutine
 import java.util.*
 
-// Keep BlockingDatabaseTests and SuspendingDatabaseTests in sync, and only change getSuspendingCollection with getSuspendingCollection
+// TODO rename all "iterable" with flow
 class SuspendingDatabaseTests {
   @Test
   fun enumHandling1(): Unit = runBlocking {
     val payload = EnumMongoPayload().apply { _id = "testId" }
-    testDb.getSuspendingCollection<EnumMongoPayload>().insertOne(payload, upsert = true)
+    testDb.getCollection<EnumMongoPayload>().insertOne(payload, upsert = true)
 
-    val results = testDb.getSuspendingCollection<EnumMongoPayload>().find(EnumMongoPayload::value1 equal EnumMongoPayload.Enum1.VALUE1)
+    val results = testDb.getCollection<EnumMongoPayload>().find(EnumMongoPayload::value1 equal EnumMongoPayload.Enum1.VALUE1)
     assert(results.toList().isNotEmpty())
-    testDb.getSuspendingCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "testId")
+    testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "testId")
   }
 
   @Test
   fun enumHandling2(): Unit = runBlocking {
     val payload = EnumMongoPayload().apply { _id = "testId" }
-    testDb.getSuspendingCollection<EnumMongoPayload>().insertOne(payload, upsert = true)
+    testDb.getCollection<EnumMongoPayload>().insertOne(payload, upsert = true)
 
-    testDb.getSuspendingCollection<EnumMongoPayload>().updateOne(EnumMongoPayload::_id equal "testId") {
+    testDb.getCollection<EnumMongoPayload>().updateOne(EnumMongoPayload::_id equal "testId") {
       EnumMongoPayload::value1 setTo EnumMongoPayload.Enum1.VALUE2
     }
 
-    val results = testDb.getSuspendingCollection<EnumMongoPayload>().find(EnumMongoPayload::value1 equal EnumMongoPayload.Enum1.VALUE2)
+    val results = testDb.getCollection<EnumMongoPayload>().find(EnumMongoPayload::value1 equal EnumMongoPayload.Enum1.VALUE2)
     assert(results.toList().isNotEmpty())
 
-    testDb.getSuspendingCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "testId")
+    testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "testId")
   }
 
   @Test
@@ -44,8 +44,8 @@ class SuspendingDatabaseTests {
     // Array enumList in EnumMongoPayload contains null, but is a non-nullable collection: _id=faultyEnumList
     // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumList
 
-    testDb.getSuspendingCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumList")
-    testDb.getSuspendingCollection<EnumMongoPayload>().blockingCollection.internalCollection.insertOne(
+    testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumList")
+    testDb.getCollection<EnumMongoPayload>().internalCollection.insertOne(
       Document(
         listOf(
           "_id" to "faultyEnumList",
@@ -56,7 +56,7 @@ class SuspendingDatabaseTests {
       )
     )
 
-    val result = testDb.getSuspendingCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumList")
+    val result = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumList")
 
     assertEquals(2, result!!.enumList.size)
     assertEquals(EnumMongoPayload.Enum1.VALUE1, result.enumList[0])
@@ -69,8 +69,8 @@ class SuspendingDatabaseTests {
     // Array enumSet in EnumMongoPayload contains null, but is a non-nullable collection: _id=faultyEnumSet
     // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumSet
 
-    testDb.getSuspendingCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumSet")
-    testDb.getSuspendingCollection<EnumMongoPayload>().blockingCollection.internalCollection.insertOne(
+    testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumSet")
+    testDb.getCollection<EnumMongoPayload>().internalCollection.insertOne(
       Document(
         setOf(
           "_id" to "faultyEnumSet",
@@ -81,7 +81,7 @@ class SuspendingDatabaseTests {
       )
     )
 
-    val result = testDb.getSuspendingCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumSet")
+    val result = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumSet")
 
     assertEquals(2, result!!.enumSet.size)
 
@@ -95,7 +95,7 @@ class SuspendingDatabaseTests {
   @Test
   fun dateDeserialization(): Unit = runBlocking {
     val payload = EnumMongoPayload().apply { _id = "datetest" }
-    testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+    testDb.getCollection<EnumMongoPayload>().let { coll ->
       coll.insertOne(payload, upsert = true)
       val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
       assert(res.date.toString() == payload.date.toString())
@@ -105,7 +105,7 @@ class SuspendingDatabaseTests {
   @Test
   fun customByteArrayDeserialization1(): Unit = runBlocking {
     val payload = EnumMongoPayload().apply { _id = "bytetest" }
-    testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+    testDb.getCollection<EnumMongoPayload>().let { coll ->
       coll.insertOne(payload, upsert = true)
       val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
       assertEquals(String(payload.byteArray), String(res.byteArray))
@@ -116,7 +116,7 @@ class SuspendingDatabaseTests {
   @Test
   fun customByteArrayDeserialization2(): Unit = runBlocking {
     val payload = EnumMongoPayload().apply { _id = "bytetest"; byteArray = "yo 😍 \u0000 😄".toByteArray() }
-    testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+    testDb.getCollection<EnumMongoPayload>().let { coll ->
       coll.insertOne(payload, upsert = true)
       val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
       assertEquals(String(payload.byteArray), String(res.byteArray))
@@ -144,10 +144,10 @@ class SuspendingDatabaseTests {
     val id = "multicreateid"
     val value = EnumMongoPayload.Enum1.VALUE2
     var createNewCalls = 0
-    testDb.getSuspendingCollection<EnumMongoPayload>().drop()
+    testDb.getCollection<EnumMongoPayload>().drop()
     (1..50).forEachAsyncCoroutine {
       (1..500).forEach {
-        val result = testDb.getSuspendingCollection<EnumMongoPayload>().findOneOrInsert(EnumMongoPayload::_id equal id) {
+        val result = testDb.getCollection<EnumMongoPayload>().findOneOrInsert(EnumMongoPayload::_id equal id) {
           createNewCalls++
           EnumMongoPayload(value1 = value)
         }
@@ -163,14 +163,14 @@ class SuspendingDatabaseTests {
     val id = "primitiveTest"
     val payload = EnumMongoPayload().apply { stringList = listOf("a", "b"); _id = id }
 
-    testDb.getSuspendingCollection<EnumMongoPayload>().insertOne(payload, upsert = true)
-    var retrievedPayload = testDb.getSuspendingCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal id)!!
+    testDb.getCollection<EnumMongoPayload>().insertOne(payload, upsert = true)
+    var retrievedPayload = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal id)!!
     assert(payload.stringList == retrievedPayload.stringList)
 
-    testDb.getSuspendingCollection<EnumMongoPayload>().updateOne(EnumMongoPayload::_id equal id) {
+    testDb.getCollection<EnumMongoPayload>().updateOne(EnumMongoPayload::_id equal id) {
       EnumMongoPayload::stringList setTo listOf("c", "d")
     }
-    retrievedPayload = testDb.getSuspendingCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal id)!!
+    retrievedPayload = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal id)!!
 
     assert(listOf("c", "d") == retrievedPayload.stringList)
   }
@@ -178,7 +178,7 @@ class SuspendingDatabaseTests {
   @Test
   fun persistencyTest(): Unit = runBlocking {
     val range = (1..10000)
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>()
+    val collection = testDb.getCollection<EnumMongoPayload>()
     val idPrefix = "persistencyTest"
 
     range.forEach { index ->
@@ -220,7 +220,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun testInfinity(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
     collection.insertOne(EnumMongoPayload().apply { _id = "testInfinityA"; double = Double.POSITIVE_INFINITY }, upsert = false)
     collection.insertOne(EnumMongoPayload().apply { _id = "testInfinityB"; double = Double.MAX_VALUE }, upsert = false)
     collection.insertOne(EnumMongoPayload().apply { _id = "testInfinityC"; double = Double.MIN_VALUE }, upsert = false)
@@ -265,7 +265,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun unsetTest(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
     val id = "unsetTest"
     collection.insertOne(document = EnumMongoPayload().apply { _id = id }, upsert = false)
 
@@ -296,7 +296,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun distinctTest(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
     val id = "distinctTest"
 
     (0..100).forEach { index ->
@@ -317,8 +317,8 @@ class SuspendingDatabaseTests {
 
   @Test
   fun equalsTest(): Unit = runBlocking {
-    val collection1 = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
-    val collection2 = testDb.getSuspendingCollection<SimpleMongoPayload>().apply { drop() }
+    val collection1 = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+    val collection2 = testDb.getCollection<SimpleMongoPayload>().apply { drop() }
 
 
     // Find
@@ -355,7 +355,7 @@ class SuspendingDatabaseTests {
 
     // 0
     (-100L..100L).forEach { long ->
-      testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+      testDb.getCollection<EnumMongoPayload>().let { coll ->
         payload.long = long
         coll.insertOne(payload, upsert = true)
         val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
@@ -365,7 +365,7 @@ class SuspendingDatabaseTests {
 
     // INT_MIN
     (Int.MIN_VALUE.toLong() - 100L..Int.MIN_VALUE.toLong() + 100L).forEach { long ->
-      testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+      testDb.getCollection<EnumMongoPayload>().let { coll ->
         payload.long = long
         coll.insertOne(payload, upsert = true)
         val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
@@ -375,7 +375,7 @@ class SuspendingDatabaseTests {
 
     // INT_MAX
     (Int.MAX_VALUE.toLong() - 100L..Int.MAX_VALUE.toLong() + 100L).forEach { long ->
-      testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+      testDb.getCollection<EnumMongoPayload>().let { coll ->
         payload.long = long
         coll.insertOne(payload, upsert = true)
         val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
@@ -385,7 +385,7 @@ class SuspendingDatabaseTests {
 
     // LONG_MIN
     (Long.MIN_VALUE..Long.MIN_VALUE + 100L).forEach { long ->
-      testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+      testDb.getCollection<EnumMongoPayload>().let { coll ->
         payload.long = long
         coll.insertOne(payload, upsert = true)
         val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
@@ -395,7 +395,7 @@ class SuspendingDatabaseTests {
 
     // LONG_MAX
     (Long.MAX_VALUE - 100L..Long.MAX_VALUE).forEach { long ->
-      testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+      testDb.getCollection<EnumMongoPayload>().let { coll ->
         payload.long = long
         coll.insertOne(payload, upsert = true)
         val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
@@ -408,7 +408,7 @@ class SuspendingDatabaseTests {
   fun dateArrayTest(): Unit = runBlocking {
     val payload = EnumMongoPayload().apply { _id = "dateArrayTest" }
 
-    testDb.getSuspendingCollection<EnumMongoPayload>().let { coll ->
+    testDb.getCollection<EnumMongoPayload>().let { coll ->
       payload.dateArray = listOf(Date(), Date().addYears(1), Date().addYears(10))
       coll.insertOne(payload, upsert = true)
       val res = coll.findOne(EnumMongoPayload::_id equal payload._id)!!
@@ -421,7 +421,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun hintTest(): Unit = runBlocking {
-    testDb.getSuspendingCollection<EnumMongoPayload>()
+    testDb.getCollection<EnumMongoPayload>()
       .find(EnumMongoPayload::value1 equal EnumMongoPayload.Enum1.VALUE1)
       .hint("value1_1_date_1")
   }
@@ -430,7 +430,7 @@ class SuspendingDatabaseTests {
   fun invalidHintTest(): Unit = runBlocking {
     assertThrows(IllegalArgumentException::class.java) {
       runBlocking {
-        testDb.getSuspendingCollection<EnumMongoPayload>()
+        testDb.getCollection<EnumMongoPayload>()
           .find(EnumMongoPayload::value1 equal EnumMongoPayload.Enum1.VALUE1)
           .hint("value1_1_date_-1")
       }
@@ -440,11 +440,11 @@ class SuspendingDatabaseTests {
   @Test
   fun nullableTest(): Unit = runBlocking {
     val payload = NullableSimpleMongoPayload().apply { _id = "nullableTest" }
-    testDb.getSuspendingCollection<NullableSimpleMongoPayload>().insertOne(payload, upsert = true)
+    testDb.getCollection<NullableSimpleMongoPayload>().insertOne(payload, upsert = true)
     assertNotNull(
-      testDb.getSuspendingCollection<NullableSimpleMongoPayload>().findOne(NullableSimpleMongoPayload::_id equal "nullableTest")
+      testDb.getCollection<NullableSimpleMongoPayload>().findOne(NullableSimpleMongoPayload::_id equal "nullableTest")
     )
-    val simpleMongoPayload = testDb.getSuspendingCollection<SimpleMongoPayload>().findOne(SimpleMongoPayload::_id equal "nullableTest")!!
+    val simpleMongoPayload = testDb.getCollection<SimpleMongoPayload>().findOne(SimpleMongoPayload::_id equal "nullableTest")!!
 
     // Known limitation: SimpleMongoPayload.string is not nullable, but due to the Jackson deserialization we throw a NPE on access.
     try {
@@ -454,12 +454,12 @@ class SuspendingDatabaseTests {
       assert(true)
     }
 
-    testDb.getSuspendingCollection<NullableSimpleMongoPayload>().deleteOne(NullableSimpleMongoPayload::_id equal "testId")
+    testDb.getCollection<NullableSimpleMongoPayload>().deleteOne(NullableSimpleMongoPayload::_id equal "testId")
   }
 
   @Test
   fun findOneOrInsertTest(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { clear() }
 
     val payload = EnumMongoPayload().apply { long = 69 }
     var returnVal = collection.findOneOrInsert(EnumMongoPayload::_id equal "findOneOrInsertTest", newEntry = { payload })
@@ -475,7 +475,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun suspendingFindTest(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { clear() }
 
     val payloads = (1..50)
       .map {
@@ -493,7 +493,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun enumMaps(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
     val id = "enumMaps"
 
     // Insert payload
@@ -523,7 +523,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun queryStats(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
 
     (1..100)
       .map { EnumMongoPayload().apply { _id = randomId() } }
@@ -579,7 +579,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun limitAndSkip(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
 
     (1..100)
       .map { EnumMongoPayload().apply { _id = randomId() } }
@@ -603,15 +603,15 @@ class SuspendingDatabaseTests {
 
   @Test
   fun sort(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
 
     val insertedPayloads = (1..100)
       .map { EnumMongoPayload().apply { _id = randomId(); long = it.toLong() % 23 } }
       .onEach { collection.insertOne(it, upsert = false) }
 
     val query = collection.find().sortByDescending(EnumMongoPayload::long)
-    val iter = query.mongoIterable.iterator()
-    assertEquals(22, iter.next().getLong("long"))
+    val iter = query.mongoIterable
+    assertEquals(22, iter.first().getLong("long"))
 
     assertEquals(insertedPayloads.minOf { it.long }, collection.find().sortBy(EnumMongoPayload::long).toList().first().long)
     assertEquals(insertedPayloads.maxOf { it.long }, collection.find().sortBy(EnumMongoPayload::long).toList().last().long)
@@ -622,7 +622,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun fieldSelection(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
     val longInsertedValue = 12345678L
     val stringListInsertedValue = listOf("a", "b", "c")
 
@@ -641,7 +641,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun testUpdateOneOrInsert(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
     val id = "testUpdateOneOrInsert"
     assertEquals(0, collection.find().count())
 
@@ -658,7 +658,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun nameEscapeTest(): Unit = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
     val id = "nameEscapeTest"
 
     collection.insertOne(EnumMongoPayload().apply { _id = id }, upsert = false)
@@ -690,7 +690,7 @@ class SuspendingDatabaseTests {
       sealedClass1 = sealedClass1Test
       sealedClass2 = sealedClass2test
     }
-    testDb.getSuspendingCollection<OpenClassMongoPayload>().insertOne(payload, upsert = true)
+    testDb.getCollection<OpenClassMongoPayload>().insertOne(payload, upsert = true)
 
     val simpleMongoPayload = testDb.getCollection<OpenClassMongoPayload>().findOne(OpenClassMongoPayload::_id equal id)
     assertEquals(sealedClass1Test.string, (simpleMongoPayload!!.sealedClass1 as OpenClassMongoPayload.SealedClass.Class1).string)
@@ -707,7 +707,7 @@ class SuspendingDatabaseTests {
 
   @Test
   fun findEquality(): Unit = runBlocking {
-    with(testDb.getSuspendingCollection<EnumMongoPayload>()) {
+    with(testDb.getCollection<EnumMongoPayload>()) {
 
       assertEquals(find(), find())
       assertEquals(find().hashCode(), find().hashCode())
@@ -736,6 +736,7 @@ class SuspendingDatabaseTests {
       assertNotEquals(find(EnumMongoPayload::_id equal ""), find())
       assertNotEquals(find(EnumMongoPayload::_id equal "").hashCode(), find().hashCode())
     }
+
   }
 
   companion object {
@@ -745,7 +746,7 @@ class SuspendingDatabaseTests {
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {
-      testDb = MongoDatabase("mongodb://localhost:27017/local") {
+      testDb = MongoDatabase.create("mongodb://localhost:27017/local") {
         collection<EnumMongoPayload>("enumColl") {
           index(EnumMongoPayload::value1.ascending())
           index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())

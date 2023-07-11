@@ -1,4 +1,6 @@
 import com.moshbit.katerbase.*
+import kotlinx.coroutines.flow.count
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.MethodOrderer
@@ -37,7 +39,7 @@ class MoviesExample {
   }
 
   @Test
-  fun `01 sign up`() {
+  fun `01 sign up`() = runBlocking {
     assertNull(database.getCollection<User>().findOne(User::email equal "john.doe@example.com"))
     assertEquals(0, database.getCollection<User>().find(User::email equal "john.doe@example.com").count())
 
@@ -51,7 +53,7 @@ class MoviesExample {
   }
 
   @Test
-  fun `02 sign in`() {
+  fun `02 sign in`() = runBlocking {
     val signInDate = Date()
 
     // Set user.lastSignIn
@@ -81,7 +83,7 @@ class MoviesExample {
   }
 
   @Test
-  fun `03 sign in - update result`() {
+  fun `03 sign in - update result`() = runBlocking {
     val signInDate = Date()
 
     assertEquals(0, database.getCollection<User>().find(User::lastSignIn greaterEquals signInDate).count())
@@ -105,8 +107,8 @@ class MoviesExample {
     @Suppress("unused")
     @BeforeAll
     @JvmStatic
-    fun setup() {
-      database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
+    fun setup(): Unit = runBlocking {
+      database = MongoDatabase.create("mongodb://localhost:27017/moviesDatabase") {
         collection<Movie>("movies") {
           index(Movie::name.textIndex())
         }

@@ -2,7 +2,8 @@ import TestPayload.Companion.testId
 import com.moshbit.katerbase.MongoDatabase
 import com.moshbit.katerbase.MongoMainEntry
 import com.moshbit.katerbase.equal
-import kotlin.concurrent.thread
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class TestPayload : MongoMainEntry() {
   var testValue = 1
@@ -13,17 +14,16 @@ class TestPayload : MongoMainEntry() {
   }
 }
 
-val localRs = object : MongoDatabase(
-  uri = "mongodb://server1:27027,server2:27037/test?replicaSet=local-rs&readPreference=primary&serverSelectionTimeoutMS=5000&connectTimeoutMS=10000",
-  allowReadFromSecondaries = false,
-  supportChangeStreams = true,
-  collections = {
-    collection<TestPayload>("testCol")
-  }) {}
+fun main(): Unit = runBlocking {
+  val localRs = MongoDatabase.create(
+    uri = "mongodb://server1:27027,server2:27037/test?replicaSet=local-rs&readPreference=primary&serverSelectionTimeoutMS=5000&connectTimeoutMS=10000",
+    allowReadFromSecondaries = false,
+    supportChangeStreams = true,
+    collections = {
+      collection<TestPayload>("testCol")
+    })
 
-val collection = localRs.getCollection<TestPayload>()
-
-fun main() {
+  val collection = localRs.getCollection<TestPayload>()
 
   var lastChange = 0
 
@@ -46,7 +46,7 @@ fun main() {
 
   collection.insertOne(TestPayload().apply { _id = testId }, upsert = true)
 
-  thread {
+  launch {
     while (true) {
       try {
         collection.updateOne(TestPayload::_id equal testId) {

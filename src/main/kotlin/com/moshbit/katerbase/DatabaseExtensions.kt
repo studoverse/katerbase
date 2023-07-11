@@ -2,15 +2,10 @@ package com.moshbit.katerbase
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.mongodb.MongoCursorNotFoundException
-import com.mongodb.client.AggregateIterable
-import com.mongodb.client.DistinctIterable
-import com.mongodb.client.FindIterable
-import com.mongodb.client.MongoIterable
 import com.mongodb.client.model.Sorts
-import kotlinx.coroutines.Dispatchers
+import com.mongodb.kotlin.client.coroutine.AggregateFlow
+import com.mongodb.kotlin.client.coroutine.FindFlow
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import org.bson.BsonDocument
 import org.bson.BsonInt32
@@ -19,27 +14,13 @@ import org.bson.conversions.Bson
 import java.io.IOException
 import kotlin.reflect.KClass
 
-abstract class AbstractDistinctCursor<Entry : Any>(val mongoIterable: DistinctIterable<Entry>, val clazz: KClass<Entry>)
-
-class DistinctCursor<Entry : Any>(mongoIterable: DistinctIterable<Entry>, clazz: KClass<Entry>) :
-  AbstractDistinctCursor<Entry>(mongoIterable, clazz), Iterable<Entry> {
-  override fun iterator(): Iterator<Entry> = mongoIterable.iterator()
-}
-
-class FlowDistinctCursor<Entry : Any>(
-  mongoIterable: DistinctIterable<Entry>, clazz: KClass<Entry>
-) : AbstractDistinctCursor<Entry>(mongoIterable, clazz), Flow<Entry> by mongoIterable.asFlow().flowOn(Dispatchers.IO)
-
-class AggregateCursor<Entry : Any>(val mongoIterable: AggregateIterable<Document>, val clazz: KClass<Entry>) : Iterable<Entry> {
-  override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
-}
-
 class FlowAggregateCursor<Entry : Any>(
-  aggregateCursor: AggregateCursor<Entry>
-) : Flow<Entry> by flowForDocumentClass(aggregateCursor.mongoIterable, aggregateCursor.clazz)
+  aggregateFlow: AggregateFlow<Document>,
+  val clazz: KClass<Entry>
+) : Flow<Entry> by flowForDocumentClass(aggregateFlow, clazz)
 
 abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindCursor<Entry, Cursor>>(
-  val mongoIterable: FindIterable<Document>,
+  val mongoIterable: FindFlow<Document>,
   val clazz: KClass<Entry>,
   val collection: MongoDatabase.MongoCollection<Entry>
 ) {
@@ -49,7 +30,11 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
   protected var projection = BsonDocument()
   protected var sort: Bson? = null
   protected var hint: Bson? = null
-  protected val mongoFilter by lazy { filterGetter.get(mongoIterable) as Bson }
+  protected val mongoFilter: Bson by lazy {
+    val wrapped = wrappedGetter.get(mongoIterable)
+    val filter = filterGetter.get(wrapped)
+    filter as Bson
+  }
 
   // Safe to do because Entry always stays the same.
   // Needed for config functions (limit(), skip()...) to return `this` with the correct type and not AbstractFindCursor
@@ -157,22 +142,18 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
   }
 
   companion object {
-    private val filterGetter = Class.forName("com.mongodb.client.internal.FindIterableImpl").declaredFields
+    private val wrappedGetter = Class.forName("com.mongodb.kotlin.client.coroutine.FindFlow").declaredFields
+      .find { it.name == "wrapped" }!!
+      .apply { isAccessible = true }
+
+    private val filterGetter = Class.forName("com.mongodb.reactivestreams.client.internal.FindPublisherImpl").declaredFields
       .find { it.name == "filter" }!!
       .apply { isAccessible = true }
   }
 }
 
-class FindCursor<Entry : MongoMainEntry>(
-  mongoIterable: FindIterable<Document>,
-  clazz: KClass<Entry>,
-  collection: MongoDatabase.MongoCollection<Entry>
-) : AbstractFindCursor<Entry, FindCursor<Entry>>(mongoIterable, clazz, collection), Iterable<Entry> {
-  override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
-}
-
 class FlowFindCursor<Entry : MongoMainEntry>(
-  mongoIterable: FindIterable<Document>,
+  mongoIterable: FindFlow<Document>,
   clazz: KClass<Entry>,
   collection: MongoDatabase.MongoCollection<Entry>,
 ) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(mongoIterable, clazz, collection),
@@ -183,23 +164,10 @@ class FlowFindCursor<Entry : MongoMainEntry>(
 }
 
 private fun <Entry : Any> flowForDocumentClass(
-  mongoIterable: MongoIterable<out Document>,
+  mongoIterable: Flow<Document>,
   clazz: KClass<Entry>
 ): Flow<Entry> = mongoIterable
-  .asFlow()
   .map { document -> deserialize(document, clazz) }
-  .flowOn(Dispatchers.IO)
-
-private fun <Entry : Any> iteratorForDocumentClass(
-  mongoIterable: MongoIterable<out Document>,
-  clazz: KClass<Entry>
-): Iterator<Entry> = object : Iterator<Entry> {
-  private val mongoIterator = mongoIterable.iterator()
-
-  override fun hasNext(): Boolean = mongoIterator.hasNext()
-
-  override fun next(): Entry = deserialize(mongoIterator.next(), clazz)
-}
 
 private fun <Entry : Any> deserialize(document: Document, clazz: KClass<Entry>): Entry {
   return try {
