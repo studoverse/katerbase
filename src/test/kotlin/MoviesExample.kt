@@ -103,7 +103,6 @@ class MoviesExample {
   companion object {
     lateinit var database: MongoDatabase
 
-    @Suppress("unused")
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {

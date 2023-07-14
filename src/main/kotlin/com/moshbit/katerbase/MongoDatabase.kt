@@ -459,12 +459,12 @@ open class MongoDatabase private constructor(
     // Returns a MongoDocument as a list of mutators. Useful if you want to set all values in an update block.
     // In case _id should be included in the mutator, set withId to true.
     private fun Entry.asMutator(withId: Boolean): List<MutatorPair<Any>> = this.toBSONDocument().map { (key, value) ->
-      @Suppress("DEPRECATION")
+      @OptIn(DirectMongoFieldAccess::class)
       MutatorPair<Any>(MongoField(key), value)
     }.let { mutator -> if (withId) mutator else mutator.filter { it.key.name != "_id" } }
 
     // Single operators
-    @Deprecated("Use only for hacks", ReplaceWith("find"))
+    @DirectMongoFieldAccess
     fun findDocuments(vararg filter: FilterPair): FindFlow<Document> {
       return internalCollection.find(filter.toFilterDocument())
     }
@@ -790,7 +790,7 @@ open class MongoDatabase private constructor(
        * More info: https://docs.mongodb.com/manual/reference/operator/update/unset/
        */
       fun <T> MongoEntryField<T>.unset() {
-        @Suppress("DEPRECATION")
+        @OptIn(DirectMongoFieldAccess::class)
         updateMutator(operator = "unset", mutator = UnsetPair(this))
       }
 
@@ -839,6 +839,7 @@ open class MongoDatabase private constructor(
        * More info: https://docs.mongodb.com/manual/reference/operator/update/push/
        */
       infix fun <Value> MongoEntryField<List<Value>>.push(value: Value) {
+        @OptIn(DirectMongoFieldAccess::class)
         updateMutator(operator = "push", mutator = PushPair(this, value))
       }
 
@@ -849,7 +850,7 @@ open class MongoDatabase private constructor(
        */
       @JvmName("pushToSet")
       infix fun <Value> MongoEntryField<Set<Value>>.push(value: Value) {
-        @Suppress("DEPRECATION") // Use the hack version because List != Set
+        @OptIn(DirectMongoFieldAccess::class) // Use the hack version because List != Set
         updateMutator(operator = "addToSet", mutator = PushPair<Value>(this.toMongoField(), value))
       }
 
@@ -858,6 +859,7 @@ open class MongoDatabase private constructor(
        * More info: https://docs.mongodb.com/manual/reference/operator/update/pull/
        */
       infix fun <Value> MongoEntryField<List<Value>>.pull(value: Value) {
+        @OptIn(DirectMongoFieldAccess::class)
         updateMutator(operator = "pull", mutator = PushPair(this, value))
       }
 
@@ -867,7 +869,7 @@ open class MongoDatabase private constructor(
        */
       @JvmName("pullFromSet")
       infix fun <Value> MongoEntryField<Set<Value>>.pull(value: Value) {
-        @Suppress("DEPRECATION")
+        @OptIn(DirectMongoFieldAccess::class)
         updateMutator(operator = "pull", mutator = PushPair<Value>(this.toMongoField(), value))
       }
 
@@ -876,6 +878,7 @@ open class MongoDatabase private constructor(
        * More info: https://docs.mongodb.com/manual/reference/operator/update/pull/
        */
       fun <Value> MongoEntryField<List<Value>>.pullWhere(vararg filter: FilterPair) {
+        @OptIn(DirectMongoFieldAccess::class)
         updateMutator(operator = "pull", mutator = PushPair(this, Document(filter.map { it.key.fieldName to it.value }.toMap())))
       }
     }

@@ -129,12 +129,12 @@ class SuspendingDatabaseTests {
   }
 
   @Test
-  @Suppress("UNCHECKED_CAST")
   fun customDateArrayTest(): Unit = runBlocking {
     val payload = CustomDateArrayCLass()
     val bson = JsonHandler.toBsonDocument(payload)
     val newPayload = JsonHandler.fromBson(bson, CustomDateArrayCLass::class)
 
+    @Suppress("UNCHECKED_CAST")
     (payload.array zip (bson["array"] as List<Date>)).forEach { (old, new) -> assert(old == new) }
     (payload.array zip newPayload.array).forEach { (old, new) -> assert(old == new) }
   }
@@ -620,6 +620,7 @@ class SuspendingDatabaseTests {
     assertEquals(insertedPayloads.minOf { it.long }, collection.find().sortByDescending(EnumMongoPayload::long).toList().last().long)
   }
 
+  @OptIn(ExcludeFieldsQueryAntiPattern::class)
   @Test
   fun fieldSelection(): Unit = runBlocking {
     val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
@@ -630,9 +631,7 @@ class SuspendingDatabaseTests {
       .map { EnumMongoPayload().apply { _id = randomId(); long = longInsertedValue; stringList = stringListInsertedValue } }
       .onEach { collection.insertOne(it, upsert = false) }
 
-    @Suppress("DEPRECATION")
     assertEquals(EnumMongoPayload().long, collection.find().excludeFields(EnumMongoPayload::long).toList().first().long)
-    @Suppress("DEPRECATION")
     assertEquals(stringListInsertedValue, collection.find().excludeFields(EnumMongoPayload::long).toList().first().stringList)
 
     assertEquals(longInsertedValue, collection.find().selectedFields(EnumMongoPayload::long).toList().first().long)
@@ -741,7 +740,6 @@ class SuspendingDatabaseTests {
   companion object {
     lateinit var testDb: MongoDatabase
 
-    @Suppress("unused")
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {

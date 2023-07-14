@@ -46,8 +46,8 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
 
   // Safe to do because Entry always stays the same.
   // Needed for config functions (limit(), skip()...) to return `this` with the correct type and not AbstractFindCursor
-  @Suppress("UNCHECKED_CAST")
   private val cursor: Cursor
+    @Suppress("UNCHECKED_CAST")
     get() = this as Cursor
 
   /* Limit number of returned objects */
@@ -77,7 +77,7 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
     this.hint = index.bson
   }
 
-  @Deprecated("Use only for hacks")
+  @DirectMongoFieldAccess
   fun projection(bson: Bson): Cursor = cursor.apply {
     flow.projection(bson)
   }
@@ -88,17 +88,14 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
     flow.projection(this.projection)
   }
 
-  @Deprecated(
-    "Excluding fields is an anti-pattern and is not maintainable. Always use selected fields. " +
-        "You can also structure your db-object into sub-objects so you only need to select one field."
-  )
+  @ExcludeFieldsQueryAntiPattern
   fun <T> excludeFields(vararg fields: MongoEntryField<out T>): Cursor = cursor.apply {
     val bson = fields.excludeBson()
     this.projection.combine(bson)
     flow.projection(this.projection)
   }
 
-  @Deprecated("Use only for hacks")
+  @DirectMongoFieldAccess
   fun sort(bson: Bson): Cursor = cursor.apply {
     flow.sort(bson)
     this.sort = bson
@@ -197,11 +194,7 @@ class FlowFindCursor<Entry : MongoMainEntry>(
   clazz: KClass<Entry>,
   collection: MongoDatabase.MongoCollection<Entry>,
 ) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(flow, clazz, collection),
-  Flow<Entry> by flowForDocumentClass(flow, clazz) {
-
-  @Deprecated("Flow analogue of 'forEach' is 'collect'", replaceWith = ReplaceWith("collect(block)"))
-  suspend inline fun forEach(noinline block: (Entry) -> Unit) = collect(block)
-}
+  Flow<Entry> by flowForDocumentClass(flow, clazz)
 
 private fun <Entry : Any> flowForDocumentClass(flow: Flow<Document>, clazz: KClass<Entry>): Flow<Entry> {
   return flow.map { document -> deserialize(document, clazz) }

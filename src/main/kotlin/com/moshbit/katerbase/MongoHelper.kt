@@ -14,6 +14,21 @@ import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
 import kotlin.reflect.KTypeParameter
 
+@RequiresOptIn("Unsafe direct access to MongoDB fields. Use only for hacks where katerbase doesn't allow typesafe queries.")
+@Retention(AnnotationRetention.BINARY)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION, AnnotationTarget.CONSTRUCTOR)
+annotation class DirectMongoFieldAccess
+
+@RequiresOptIn(
+  "Excluding fields is an anti-pattern and is not maintainable, " +
+      "because you might always add new fields to the entity and forget to exclude them on all exclude queries. " +
+      "Use selectedFields() instead. " +
+      "Alternatively, you can also structure your db-object into sub-objects so you only need to select one field."
+)
+@Retention(AnnotationRetention.BINARY)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION, AnnotationTarget.CONSTRUCTOR)
+annotation class ExcludeFieldsQueryAntiPattern
+
 abstract class MongoEntry {
   fun toBSONDocument(): Document = JsonHandler.toBsonDocument(this)
 }
@@ -56,9 +71,8 @@ abstract class MongoMainEntry : MongoEntry() {
   }
 }
 
-@Suppress("UNCHECKED_CAST")
 private fun Any?.toBSONDocument(): Any? = when (this) {
-  null -> this
+  null -> null
   is String, is Int, is Long, is Double, is Float, is Date, is Boolean, is ByteArray -> this
   is Enum<*> -> this.name
   is Collection<*> -> this.map { it.toBSONDocument() }
@@ -81,6 +95,7 @@ fun Array<out MongoPair>.toFilterDocument(): Document {
         value.forEach { innerKey, innerValue -> innerBson[innerKey] = innerValue }
         bson[key.name] = innerBson // Add merged Document to outer Document
       }
+
       else -> bson[key.name] = value
     }
   }
@@ -180,49 +195,48 @@ abstract class MongoPair(val key: MongoField, val value: Any?) {
 }
 
 class FilterPair
-@Deprecated("Use only for hacks") constructor(key: MongoField, value: Any?) : MongoPair(key, value.toBSONDocument()) {
+@DirectMongoFieldAccess constructor(key: MongoField, value: Any?) : MongoPair(key, value.toBSONDocument()) {
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<out Any?>, value: Any?) : this(key.toMongoField(), value)
 }
 
 class MutatorPair<out Value>
-@Deprecated("Use only for hacks") constructor(key: MongoField, value: Any?) : MongoPair(key, value.toBSONDocument()) {
+@DirectMongoFieldAccess constructor(key: MongoField, value: Any?) : MongoPair(key, value.toBSONDocument()) {
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<out Value>, value: Value?) : this(key.toMongoField(), value)
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<out Value>, value: Document) : this(key.toMongoField(), value)
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<out Value>, value: List<Document>) : this(key.toMongoField(), value)
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<Map<String, Value>>, value: Pair<String, Value>) :
       this(key.toMongoField().extend(value.first), value.second)
 }
 
 class PushPair<Value>
-@Deprecated("Use only for hacks") constructor(key: MongoField, value: Any?) : MongoPair(key, value.toBSONDocument()) {
+@DirectMongoFieldAccess constructor(key: MongoField, value: Any?) : MongoPair(key, value.toBSONDocument()) {
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<List<Value>>, value: Value?) : this(key.toMongoField(), value)
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<List<Value>>, value: Document) : this(key.toMongoField(), value)
 }
 
 // See: https://docs.mongodb.com/manual/reference/operator/update/unset/
-@Deprecated("Use only for hacks")
-class UnsetPair(key: MongoField) : MongoPair(key, value = "") {
+class UnsetPair
+@DirectMongoFieldAccess constructor(key: MongoField) : MongoPair(key, value = "") {
 
-  @Suppress("DEPRECATION")
+  @OptIn(DirectMongoFieldAccess::class)
   constructor(key: MongoEntryField<out Any?>) : this(key.toMongoField())
 }
 
 // FilterPair
-
 infix fun <Value> MongoEntryField<Value>.equal(value: Value?) = FilterPair(this, value)
 infix fun <Value> MongoEntryField<Value>.notEqual(value: Value?) = FilterPair(this, Document("\$ne", value))
 
@@ -293,11 +307,13 @@ fun <Value> MongoEntryField<Value>.inRange(start: Value, end: Value, includeStar
 infix fun <Value> MongoEntryField<Value>.exists(value: Boolean) = FilterPair(this, Document("\$exists", value))
 
 // MutatorPair
-
 infix fun <Value> MongoEntryField<Value>.valueDocument(value: Document) = MutatorPair(this, value)
 
 // PushPair
-infix fun <Value> MongoEntryField<List<Value>>.valueDocument(value: Document) = PushPair(this, value)
+infix fun <Value> MongoEntryField<List<Value>>.valueDocument(value: Document): PushPair<Value> {
+  @OptIn(DirectMongoFieldAccess::class)
+  return PushPair(this, value)
+}
 
 // Global operators
 // These should look like this: find({$or:[{_id: "1"}, {_id: "2"}]})
@@ -305,16 +321,23 @@ infix fun <Value> MongoEntryField<List<Value>>.valueDocument(value: Document) = 
 // Bind these to MongoDatabase so they are "not so global"
 
 // Logical operators
-@Suppress("DEPRECATION", "unused")
-fun MongoDatabase.or(vararg filter: FilterPair) = FilterPair(MongoField("\$or"), filter.map { arrayOf(it).toFilterDocument() })
 
-@Suppress("DEPRECATION", "unused")
-fun MongoDatabase.and(vararg filter: FilterPair) = FilterPair(MongoField("\$and"), filter.map { arrayOf(it).toFilterDocument() })
+fun MongoDatabase.or(vararg filter: FilterPair): FilterPair {
+  @OptIn(DirectMongoFieldAccess::class)
+  return FilterPair(MongoField("\$or"), filter.map { arrayOf(it).toFilterDocument() })
+}
+
+fun MongoDatabase.and(vararg filter: FilterPair): FilterPair {
+  @OptIn(DirectMongoFieldAccess::class)
+  return FilterPair(MongoField("\$and"), filter.map { arrayOf(it).toFilterDocument() })
+}
 
 // This call requires a Text Index https://docs.mongodb.com/manual/text-search/#text-operator
 // All fields that are defined as Text Index in this collection are searched.
-@Suppress("DEPRECATION")
-infix fun MongoDatabase.searchText(value: String) = FilterPair(MongoField("\$text"), Document("\$search", value))
+infix fun MongoDatabase.searchText(value: String): FilterPair {
+  @OptIn(DirectMongoFieldAccess::class)
+  return FilterPair(MongoField("\$text"), Document("\$search", value))
+}
 
 // Aggregation
 fun aggregationPipeline(block: AggregationPipeline.() -> Unit): AggregationPipeline = AggregationPipeline().apply { block() }
@@ -392,7 +415,7 @@ class AggregationPipeline {
       accumulators += Accumulator(bsonField = Accumulators.sum(field.name, 1))
     }
 
-    @Deprecated("Use only for hacks")
+    @DirectMongoFieldAccess
     fun addAccumulator(bsonField: BsonField) {
       accumulators += Accumulator(bsonField)
     }

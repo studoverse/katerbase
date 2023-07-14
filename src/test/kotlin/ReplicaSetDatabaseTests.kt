@@ -72,7 +72,6 @@ class ReplicaSetDatabaseTests {
   companion object {
     lateinit var testDb: MongoDatabase
 
-    @Suppress("unused")
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {
