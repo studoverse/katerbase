@@ -4,9 +4,13 @@ import com.fasterxml.jackson.core.JsonProcessingException
 import com.mongodb.MongoCursorNotFoundException
 import com.mongodb.client.model.Sorts
 import com.mongodb.kotlin.client.coroutine.AggregateFlow
+import com.mongodb.kotlin.client.coroutine.DistinctFlow
 import com.mongodb.kotlin.client.coroutine.FindFlow
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.ChannelIterator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.produceIn
 import org.bson.BsonDocument
 import org.bson.BsonInt32
 import org.bson.Document
@@ -14,13 +18,17 @@ import org.bson.conversions.Bson
 import java.io.IOException
 import kotlin.reflect.KClass
 
+class AggregateCursor<Entry : Any>(val aggregateFlow: AggregateFlow<Document>, val clazz: KClass<Entry>) : Iterable<Entry> {
+  override fun iterator() = flowForDocumentClass(aggregateFlow, clazz).toBlockingIterator()
+}
+
 class FlowAggregateCursor<Entry : Any>(
-  aggregateFlow: AggregateFlow<Document>,
+  val aggregateFlow: AggregateFlow<Document>,
   val clazz: KClass<Entry>
 ) : Flow<Entry> by flowForDocumentClass(aggregateFlow, clazz)
 
 abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindCursor<Entry, Cursor>>(
-  val mongoIterable: FindFlow<Document>,
+  val flow: FindFlow<Document>,
   val clazz: KClass<Entry>,
   val collection: MongoDatabase.MongoCollection<Entry>
 ) {
@@ -31,7 +39,7 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
   protected var sort: Bson? = null
   protected var hint: Bson? = null
   protected val mongoFilter: Bson by lazy {
-    val wrapped = wrappedGetter.get(mongoIterable)
+    val wrapped = wrappedGetter.get(flow)
     val filter = filterGetter.get(wrapped)
     filter as Bson
   }
@@ -44,17 +52,17 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
 
   /* Limit number of returned objects */
   fun limit(limit: Int): Cursor = cursor.apply {
-    mongoIterable.limit(limit)
+    flow.limit(limit)
     this.limit = limit
   }
 
   fun skip(skip: Int): Cursor = cursor.apply {
-    mongoIterable.skip(skip)
+    flow.skip(skip)
     this.skip = skip
   }
 
   fun batchSize(batchSize: Int): Cursor = cursor.apply {
-    mongoIterable.batchSize(batchSize)
+    flow.batchSize(batchSize)
     this.batchSize = batchSize
   }
 
@@ -65,19 +73,19 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
     )
 
   fun hint(index: MongoDatabase.MongoCollection<Entry>.MongoIndex): Cursor = cursor.apply {
-    mongoIterable.hint(index.bson)
+    flow.hint(index.bson)
     this.hint = index.bson
   }
 
   @Deprecated("Use only for hacks")
   fun projection(bson: Bson): Cursor = cursor.apply {
-    mongoIterable.projection(bson)
+    flow.projection(bson)
   }
 
   fun <T> selectedFields(vararg fields: MongoEntryField<out T>): Cursor = cursor.apply {
     val bson = fields.includeBson()
     this.projection.combine(bson)
-    mongoIterable.projection(this.projection)
+    flow.projection(this.projection)
   }
 
   @Deprecated(
@@ -87,26 +95,26 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
   fun <T> excludeFields(vararg fields: MongoEntryField<out T>): Cursor = cursor.apply {
     val bson = fields.excludeBson()
     this.projection.combine(bson)
-    mongoIterable.projection(this.projection)
+    flow.projection(this.projection)
   }
 
   @Deprecated("Use only for hacks")
   fun sort(bson: Bson): Cursor = cursor.apply {
-    mongoIterable.sort(bson)
+    flow.sort(bson)
     this.sort = bson
   }
 
   fun <T> sortByDescending(field: MongoEntryField<T>): Cursor = cursor.apply {
     val fieldName = field.toMongoField().name
     val bson = Sorts.descending(fieldName)
-    mongoIterable.sort(bson)
+    flow.sort(bson)
     this.sort = bson
   }
 
   fun <T> sortBy(field: MongoEntryField<T>): Cursor = cursor.apply {
     val fieldName = field.toMongoField().name
     val bson = Sorts.ascending(fieldName)
-    mongoIterable.sort(bson)
+    flow.sort(bson)
     this.sort = bson
   }
 
@@ -152,22 +160,52 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
   }
 }
 
+class FindCursor<Entry : MongoMainEntry>(
+  flow: FindFlow<Document>,
+  clazz: KClass<Entry>,
+  collection: MongoDatabase.MongoCollection<Entry>
+) : AbstractFindCursor<Entry, FindCursor<Entry>>(flow, clazz, collection), Iterable<Entry> {
+  override fun iterator() = flowForDocumentClass(flow, clazz).toBlockingIterator()
+}
+
+class DistinctCursor<T : Any>(
+  val flow: DistinctFlow<T>,
+) : Iterable<T> {
+  override fun iterator() = flow.toBlockingIterator()
+}
+
+@OptIn(FlowPreview::class, DelicateCoroutinesApi::class)
+internal fun <T> Flow<T>.toBlockingIterator(scope: CoroutineScope = GlobalScope): Iterator<T> {
+  return this
+    .produceIn(scope)
+    .iterator()
+    .toBlockingIterator()
+}
+
+internal fun <T> ChannelIterator<T>.toBlockingIterator() = object : Iterator<T> {
+  override fun hasNext(): Boolean {
+    return runBlocking { this@toBlockingIterator.hasNext() }
+  }
+
+  override fun next(): T {
+    return runBlocking { this@toBlockingIterator.next() }
+  }
+}
+
 class FlowFindCursor<Entry : MongoMainEntry>(
-  mongoIterable: FindFlow<Document>,
+  flow: FindFlow<Document>,
   clazz: KClass<Entry>,
   collection: MongoDatabase.MongoCollection<Entry>,
-) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(mongoIterable, clazz, collection),
-  Flow<Entry> by flowForDocumentClass(mongoIterable, clazz) {
+) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(flow, clazz, collection),
+  Flow<Entry> by flowForDocumentClass(flow, clazz) {
 
   @Deprecated("Flow analogue of 'forEach' is 'collect'", replaceWith = ReplaceWith("collect(block)"))
   suspend inline fun forEach(noinline block: (Entry) -> Unit) = collect(block)
 }
 
-private fun <Entry : Any> flowForDocumentClass(
-  mongoIterable: Flow<Document>,
-  clazz: KClass<Entry>
-): Flow<Entry> = mongoIterable
-  .map { document -> deserialize(document, clazz) }
+private fun <Entry : Any> flowForDocumentClass(flow: Flow<Document>, clazz: KClass<Entry>): Flow<Entry> {
+  return flow.map { document -> deserialize(document, clazz) }
+}
 
 private fun <Entry : Any> deserialize(document: Document, clazz: KClass<Entry>): Entry {
   return try {

@@ -13,12 +13,12 @@ class ReplicaSetDatabaseTests {
 
   @Test
   fun transactionSingleCollectionTest() = runBlocking {
-    val collection = testDb.getCollection<EnumMongoPayload>().apply { clear() }
+    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
 
     Assertions.assertEquals(0, collection.count(EnumMongoPayload::long equal 42))
 
     testDb.executeTransaction { database ->
-      val transactionalCollection = database.getCollection<EnumMongoPayload>()
+      val transactionalCollection = database.getSuspendingCollection<EnumMongoPayload>()
 
       transactionalCollection.insertOne(EnumMongoPayload().apply { _id = "1"; long = 42 }, upsert = true)
       transactionalCollection.insertOne(EnumMongoPayload().apply { _id = "2"; long = 42 }, upsert = true)
@@ -36,15 +36,15 @@ class ReplicaSetDatabaseTests {
 
   @Test
   fun transactionMultiCollectionTest() = runBlocking {
-    val collection1 = testDb.getCollection<EnumMongoPayload>().apply { clear() }
-    val collection2 = testDb.getCollection<SimpleMongoPayload>().apply { clear() }
+    val collection1 = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
+    val collection2 = testDb.getSuspendingCollection<SimpleMongoPayload>().apply { clear() }
 
     Assertions.assertEquals(0, collection1.count(EnumMongoPayload::long equal 42))
     Assertions.assertEquals(0, collection2.count(SimpleMongoPayload::string equal "42"))
 
     testDb.executeTransaction { database ->
-      val transactionalCollection1 = database.getCollection<EnumMongoPayload>()
-      val transactionalCollection2 = database.getCollection<SimpleMongoPayload>()
+      val transactionalCollection1 = database.getSuspendingCollection<EnumMongoPayload>()
+      val transactionalCollection2 = database.getSuspendingCollection<SimpleMongoPayload>()
 
       transactionalCollection1.insertOne(EnumMongoPayload().apply { _id = "1"; long = 42 }, upsert = true)
       transactionalCollection1.insertOne(EnumMongoPayload().apply { _id = "2"; long = 42 }, upsert = true)

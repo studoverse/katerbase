@@ -14,49 +14,19 @@ import com.mongodb.kotlin.client.coroutine.ClientSession
 import com.mongodb.kotlin.client.coroutine.DistinctFlow
 import com.mongodb.kotlin.client.coroutine.FindFlow
 import com.mongodb.kotlin.client.coroutine.MongoClient
-import kotlinx.coroutines.CoroutineName
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.toSet
-import kotlinx.coroutines.launch
 import org.bson.*
 import org.bson.conversions.Bson
 import java.util.*
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
-import kotlin.collections.LinkedHashMap
-import kotlin.collections.List
-import kotlin.collections.Map
-import kotlin.collections.MutableList
-import kotlin.collections.MutableMap
-import kotlin.collections.Set
-import kotlin.collections.associateBy
 import kotlin.collections.component1
 import kotlin.collections.component2
-import kotlin.collections.emptyList
-import kotlin.collections.emptyMap
 import kotlin.collections.filter
-import kotlin.collections.first
-import kotlin.collections.forEach
-import kotlin.collections.getOrPut
-import kotlin.collections.getValue
-import kotlin.collections.isEmpty
-import kotlin.collections.isNotEmpty
-import kotlin.collections.joinToString
-import kotlin.collections.listOf
-import kotlin.collections.map
-import kotlin.collections.mapOf
-import kotlin.collections.mutableListOf
-import kotlin.collections.none
-import kotlin.collections.plus
 import kotlin.collections.set
-import kotlin.collections.singleOrNull
-import kotlin.collections.toList
-import kotlin.collections.toMap
-import kotlin.collections.toSet
-import kotlin.collections.toTypedArray
 import kotlin.concurrent.thread
 import kotlin.math.absoluteValue
 import kotlin.reflect.KClass
@@ -82,7 +52,11 @@ open class MongoDatabase private constructor(
   protected var changeStreamClient: MongoClient? = null
   protected lateinit var changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
 
-  open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
+  open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): BlockingMongoCollection<T> {
+    return BlockingMongoCollection(getSuspendingCollection(entryClass))
+  }
+
+  open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
     return mongoCollections[entryClass] as? MongoCollection<T>
       ?: throw IllegalArgumentException("No collection exists for ${entryClass.simpleName}")
@@ -132,8 +106,12 @@ open class MongoDatabase private constructor(
       indexes = emptyList(), // Indexes are already created so no need to declare them here.
     )
 
-    override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
-      return TransactionalCollection(mongoCollection = this@MongoDatabase.getCollection(entryClass))
+    override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): BlockingMongoCollection<T> {
+      return BlockingMongoCollection(TransactionalCollection(mongoCollection = this@MongoDatabase.getSuspendingCollection(entryClass)))
+    }
+
+    override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): MongoCollection<T> {
+      return TransactionalCollection(mongoCollection = this@MongoDatabase.getSuspendingCollection(entryClass))
     }
   }
 
@@ -571,8 +549,8 @@ open class MongoDatabase private constructor(
         internalCollection.distinct(
           /* fieldName = */ distinctField.name,
           /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ entryClass.java
-          )
+          /* resultClass = */ entryClass.java
+        )
       }
     }
 
@@ -970,6 +948,132 @@ open class MongoDatabase private constructor(
         winningPlan = getPipeline(winningPlan),
         executionStatsRaw = executionStats,
       )
+    }
+  }
+
+  inner class BlockingMongoCollection<Entry : MongoMainEntry>(
+    val suspendingCollection: MongoCollection<Entry>
+  ) {
+    val name: String get() = suspendingCollection.name
+    val entryClass: KClass<Entry> get() = suspendingCollection.entryClass
+
+    fun watch(pipeline: Document = defaultWatchPipeline, action: (Result<PayloadChange<Entry>>) -> Unit) {
+      suspendingCollection.watch(pipeline) { change ->
+        runBlocking { action(change) }
+      }
+    }
+
+    fun drop() {
+      runBlocking { suspendingCollection.drop() }
+    }
+
+    fun clear(): DeleteResult {
+      return runBlocking { suspendingCollection.clear() }
+    }
+
+    fun count(vararg filter: FilterPair): Long {
+      return runBlocking { suspendingCollection.count(*filter) }
+    }
+
+    fun bulkWrite(
+      options: BulkWriteOptions = BulkWriteOptions(),
+      action: MongoCollection<Entry>.BulkOperation.() -> Unit
+    ): BulkWriteResult {
+      return runBlocking { suspendingCollection.bulkWrite(options, action) }
+    }
+
+    fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T> {
+      val cursor = suspendingCollection.aggregate(pipeline, entryClass)
+      return AggregateCursor(cursor.aggregateFlow, entryClass)
+    }
+
+    inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): AggregateCursor<T> {
+      return aggregate(
+        pipeline = aggregationPipeline(pipeline),
+        entryClass = T::class
+      )
+    }
+
+    fun sample(size: Int): AggregateCursor<Entry> {
+      return aggregate(
+        pipeline = aggregationPipeline { sample(size) },
+        entryClass = entryClass
+      )
+    }
+
+    fun find(vararg filter: FilterPair): FindCursor<Entry> {
+      return runBlocking {
+        val cursor = suspendingCollection.find(*filter)
+        FindCursor(cursor.flow, cursor.clazz, cursor.collection)
+      }
+    }
+
+    fun findOne(vararg filter: FilterPair): Entry? {
+      return runBlocking { suspendingCollection.findOne(*filter) }
+    }
+
+    fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
+      return runBlocking { suspendingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
+    }
+
+    /**
+     * Use this if you need a set of distinct specific value of a document
+     * More info: https://docs.mongodb.com/manual/reference/method/db.collection.distinct/
+     */
+    fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
+      return DistinctCursor(suspendingCollection.distinct(distinctField, entryClass, filter = filter))
+    }
+
+    inline fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T> {
+      return distinct(distinctField, T::class, *filter)
+    }
+
+    fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+      return runBlocking { suspendingCollection.updateOne(*filter, update = update) }
+    }
+
+    fun updateOneOrInsert(filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+      return runBlocking { suspendingCollection.updateOneOrInsert(filter, update = update) }
+    }
+
+    fun updateOneAndFind(
+      vararg filter: FilterPair,
+      upsert: Boolean = false,
+      returnDocument: ReturnDocument = ReturnDocument.AFTER,
+      update: MongoCollection<Entry>.UpdateOperation.() -> Unit
+    ): Entry? {
+      return runBlocking {
+        suspendingCollection.updateOneAndFind(
+          *filter,
+          upsert = upsert,
+          returnDocument = returnDocument,
+          update = update
+        )
+      }
+    }
+
+    fun updateMany(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+      return runBlocking { suspendingCollection.updateMany(*filter, update = update) }
+    }
+
+    fun insertOne(document: Entry, upsert: Boolean) {
+      return runBlocking { suspendingCollection.insertOne(document, upsert) }
+    }
+
+    fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
+      return runBlocking { suspendingCollection.insertOne(document, onDuplicateKey) }
+    }
+
+    fun deleteOne(vararg filter: FilterPair): DeleteResult {
+      return runBlocking { suspendingCollection.deleteOne(*filter) }
+    }
+
+    fun deleteMany(vararg filter: FilterPair): DeleteResult {
+      return runBlocking { suspendingCollection.deleteMany(*filter) }
+    }
+
+    fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
+      return runBlocking { suspendingCollection.getQueryStats(*filter, limit = limit) }
     }
   }
 

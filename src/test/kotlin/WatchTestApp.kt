@@ -2,8 +2,8 @@ import TestPayload.Companion.testId
 import com.moshbit.katerbase.MongoDatabase
 import com.moshbit.katerbase.MongoMainEntry
 import com.moshbit.katerbase.equal
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlin.concurrent.thread
 
 class TestPayload : MongoMainEntry() {
   var testValue = 1
@@ -46,7 +46,7 @@ fun main(): Unit = runBlocking {
 
   collection.insertOne(TestPayload().apply { _id = testId }, upsert = true)
 
-  launch {
+  thread {
     while (true) {
       try {
         collection.updateOne(TestPayload::_id equal testId) {

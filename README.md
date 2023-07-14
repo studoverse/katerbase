@@ -1,11 +1,14 @@
+// TODO update readme to Flow, remove all references to Java. Validate all links.
+
 # Katerbase
 
-Katerbase [keɪtərbeɪs] is a Kotlin wrapper for the [MongoDB Java Driver](http://mongodb.github.io/mongo-java-driver/) and offers idiomatic Kotlin support for MongoDB.
-Its goal is to write concise and simple MongoDB queries without any boilerplate or ceremony. IDE autocompletion and type safety allow you to start writing MongoDB queries, even if you haven't used the MongoDB query syntax before.
+Katerbase [keɪtərbeɪs] is a Kotlin wrapper for the [MongoDB Java Driver](http://mongodb.github.io/mongo-java-driver/) and offers idiomatic
+Kotlin support for MongoDB.
+Its goal is to write concise and simple MongoDB queries without any boilerplate or ceremony. IDE autocompletion and type safety allow you to
+start writing MongoDB queries, even if you haven't used the MongoDB query syntax before.
 
-Katerbase has object mapping built in, so queried data from MongoDB get deserialized by 
+Katerbase has object mapping built in, so queried data from MongoDB get deserialized by
 [Jackson](https://github.com/FasterXML/jackson-module-kotlin) into Kotlin classes.
-
 
 ## Quick start
 
@@ -28,7 +31,7 @@ col.insertOne(Book().apply {
 }, upsert = false)
 
 // MongoDB JS syntax: db.collection.find({author: "Tolkien"})
-val tolkienBooks: Iterable<Book> = col.find(Book::author equal "Tolkien")
+val tolkienBooks: Flow<Book> = col.find(Book::author equal "Tolkien")
 
 // MongoDB JS syntax: db.collection.updateOne({_id: "the_hobbit"}, {yearPublished: 1937}, {upsert: false})
 col.updateOne(Book::_id equal "the_hobbit") {
@@ -39,7 +42,7 @@ col.updateOne(Book::_id equal "the_hobbit") {
 val book: Book? = col.findOne(Book::author equal "Tolkien", Book::yearPublished lowerEquals 1940)
 ```
 
-Check out the Katerbase [read operations](#read-operations) and [write operations](#write-operations) sections for all supported MongoDB operations and examples. 
+Check out the Katerbase [read operations](#read-operations) and [write operations](#write-operations) sections for all supported MongoDB operations and examples.
 
 ### Database Setup
 
@@ -64,7 +67,7 @@ The `com.moshbit.katerbase.MongoDatabase` has an `internalDatabase: com.mongodb.
 ### Collection Setup
 
 Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the corresponding Kotlin model class to  the `collection` constructor argument of the `MongoDatabase`, see [database setup](#database-setup). As long as `autoManageCollectionsAndIndexes` is not disabled, Katerbase will automatically create the defined collection.
- 
+
 ```kotlin
 class Movie : MongoMainEntry() {
   class Actor : MongoSubEntry(f) {
@@ -79,18 +82,15 @@ class Movie : MongoMainEntry() {
 
 The Kotlin model class must inherit from `MongoMainEntry`, therefore `Movie` also has a `var _id: String` field. Only `MongoMainEntry` objects can be inserted and queried from the MongoDB. MongoDB [embedded/nested documents](https://docs.mongodb.com/manual/tutorial/query-embedded-documents/) must inherit from `MongoSubEntry` to explicitly opt-in into the serialization and deserialization of the subdocument class.
 
-
 ### Installation
 
 Currently, the library is not yet published to Maven Central. To use Katerbase, download this Git repository and add the Kotlin files manually to your project. The library will be published to Maven Central at a later point.
-
 
 ## Read operations
 
 The following operations can be executed on a collection, for example `database.getCollection<Movie>.find()` for blocking operations
 and `database.getSuspendingCollection<Movie>.find()` for suspending operations
 via [coroutines](https://kotlinlang.org/docs/coroutines-overview.html).
-
 
 ### find
 `fun find(vararg filter: FilterPair): FindCursor<Entry>`
@@ -108,7 +108,7 @@ The order of the `vararg filter: FilterPair` argument does not matter in all Kat
 
 [List of all supported filter operators](#filter-operators).
 
-The returned `FindCursor` is an `Iterable`. Before iterating though the objects further operations can be applied to the `FindCursor`:
+The returned `FindCursor` is a `Flow`. Before iterating though the objects further operations can be applied to the `FindCursor`:
 
 * `limit(limit: Int)` - [cursor.limit](https://docs.mongodb.com/manual/reference/method/cursor.limit/)
 * `skip(skip: Int)` - [cursor.skip](https://docs.mongodb.com/manual/reference/method/cursor.skip/)
@@ -120,17 +120,20 @@ The returned `FindCursor` is an `Iterable`. Before iterating though the objects 
 * `sortByDescending(field: MongoEntryField)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/)
 * `sort(bson: Bson)` - [cursor.sort](https://docs.mongodb.com/manual/reference/method/cursor.sort/): Direct `Bson` access, use only if `sortBy` and `sortByDescending` are insufficient.
 
-The order of the `FindCursor` operations do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the MongoDB. Note that each `FindCursor` should only be iterated once, as each iteration results in a network access to the database, see [MongoIterable](http://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/MongoIterable.html). Use `FindCurosor.toList()` in you need to traverse the `Iterator` more than once. If a `FindCursor` won't get iterated, no database operation gets executed. A `FindCursor` is mutable and comparable.
+The order of the `FindCursor` operations do not matter. As soon as the iteration starts, the `FindCursor` gets serialized and sent to the
+MongoDB. Note that each `FindCursor` should only be iterated once, as each iteration results in a network access to the database,
+see [Access Data From a Flow](https://www.mongodb.com/docs/drivers/kotlin/coroutine/current/fundamentals/crud/read-operations/flow/).
+Use `FindCurosor.toList()` in you need to traverse the `Flow` more than once. If a `FindCursor` won't get iterated/collected, no database
+operation gets executed. A `FindCursor` is mutable and comparable.
 
 Example usage:
 ```kotlin
-val books: Iterable<Book> = col.find(Book::author equal "Tokien")
+val books: Flow<Book> = col.find(Book::author equal "Tokien")
     .selectedFields(Book::author, Book::yearPublished)
     .sortByDescending(Book::yearPublished)
     .skip(20)
     .limit(10)
 ```
-
 
 ### findOne
 `fun findOne(vararg filter: FilterPair): Entry?`
@@ -138,18 +141,25 @@ val books: Iterable<Book> = col.find(Book::author equal "Tokien")
 [db.collection.findOne(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.findOne/) MongoDB operation
 
 In contrast to `find()`, the `findOne()` operation gets immediately executed on the database, and the retuned value is the actual Kotlin object.
- 
+
 `findOne(filter)` is implemented by `find(*filter).limit(1).firstOrNull()`. So all filter operators from [find](#find) apply here too, cursor operators can't be used. If you need to call `findOne` with additional cursor operators, just use `find` with `limit(1)` and `firstOrNull`.
 
-
 ### findDocuments
-`fun findDocuments(vararg filter: FilterPair): FindIterable<Document>`
+
+`fun findDocuments(vararg filter: FilterPair): Flow<Document>`
 
 [db.collection.find(query, projection)](https://docs.mongodb.com/manual/reference/method/db.collection.find/) MongoDB operation
 
-`findDocuments()` returns a `FindIterable<Document>` in contrast to `find()` which returns a `FindCursor<Entry>`. So no type mapping is done, and instead of using the Katerbase find-operations like `limit()` the mongo-java-driver operations of the FindIterable can be used. `Document` is in package `org.bson.Document` of the mongo-java-driver library and implements `Map<String, Object>, Serializable, Bson`. `FindIterable` is in package `com.mongodb.client` of the mongo-java-driver library and inherits from `MongoIterable<TResult>` which inherits from `Iterable<TResult>`.
+`findDocuments()` returns a `Flow<Document>` in contrast to `find()` which returns a `FindCursor<Entry>`. So no type mapping is done, and
+instead of using the Katerbase find-operations like `limit()` the mongo-java-driver operations of the FindIterable can be used. `Document`
+is in package `org.bson.Document` of the mongo-java-driver library and implements `Map<String, Object>, Serializable, Bson`. `FindIterable`
+is in package `com.mongodb.client` of the mongo-java-driver library and inherits from `MongoIterable<TResult>` which inherits
+from `Iterable<TResult>`.
 
-By using `findDocuments()` Katerbase offers direct access to the mongo-java-driver for all edge-cases that Katerbase doesn't support. The MongoDB documentation for [FindIterable](https://mongodb.github.io/mongo-java-driver/3.12/driver/tutorials/perform-read-operations/#finditerable) explains all supported methods you can chain to the `findDocuments()`  operation.
+By using `findDocuments()` Katerbase offers direct access to the mongodb-driver-kotlin-coroutine for all edge-cases that Katerbase doesn't
+support. The MongoDB documentation
+for [ReadOperations](https://www.mongodb.com/docs/drivers/kotlin/coroutine/current/fundamentals/crud/read-operations/) explains all
+supported methods you can chain to the `findDocuments()` operation.
 
 ### count
 `fun count(vararg filter: FilterPair): Long`
@@ -158,26 +168,29 @@ By using `findDocuments()` Katerbase offers direct access to the mongo-java-driv
 
 Counts how many matching documents in a collection are. If the filter is empty, [estimatedDocumentCount](https://docs.mongodb.com/manual/reference/method/db.collection.estimatedDocumentCount/) is used which  always results in *O(1)* runtime, but the returned count might be out of date. If a filter is specified, [countDocuments](https://docs.mongodb.com/manual/reference/method/db.collection.countDocuments/) with runtime of up to *O(n)* (depending on whether an index is used or not) is used.
 
-
 ### distinct
 `fun <reified T : Any> distinct(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>`
 
 [db.collection.distinct()](https://docs.mongodb.com/manual/reference/method/db.collection.distinct/) MongoDB operation
 
-Returns an `Iterable` of the specified field with no duplicates. E.g. `col.distinct(Book::author)` returns an `Iterable<String>` with unique Strings. When applying filtering you get e.g. by calling `col.distinct(Book::author, Book::yearPublished lower 2000)` all author names that have published at least one book before year 2000.
+Returns a `Flow` of the specified field with no duplicates. E.g. `col.distinct(Book::author)` returns a `Flow<String>` with unique Strings.
+When applying filtering you get e.g. by calling `col.distinct(Book::author, Book::yearPublished lower 2000)` all author names that have
+published at least one book before year 2000.
 
-As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be iterated only once, as each iteration results in a network access to the database, see [DistinctIterable](http://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/DistinctIterable.html). `DistinctCursor` inherits from `MongoIterable`. Use `DistinctCursor.toSet()` if you need to traverse the `Iterator` more than once. If a `DistinctCursor` won't get iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
+As soon as the iteration starts, the `DistinctCursor` gets serialized and sent to the MongoDB. Note that each `DistinctCursor` should be
+iterated only once, as each iteration results in a network access to the database,
+see [Retrieve Distinct Values of a Field](https://www.mongodb.com/docs/drivers/kotlin/coroutine/current/usage-examples/distinct/). `DistinctCursor`
+inherits from `Flow`. Use `DistinctCursor.toSet()` if you need to traverse the `Flow` more than once. If a `DistinctCursor` won't get
+iterated, no database operation gets executed. A `DistinctCursor` is mutable and comparable.
 
 In case `T` can't be reified, pass the `entryClass` to the overloaded function
 `fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T>`.
 
 Due to a [Kotlin compiler bug](https://youtrack.jetbrains.com/issue/KT-35105) that happens when using Kotlin-NewInference starting at Kotlin 1.3.60, this function might not be callable. Therefore, you can use meanwhile the function `fun <reified T : Any> distinct_mitigateCompilerBug(distinctField: MongoEntryField<T>, vararg filter: FilterPair): DistinctCursor<T>` as workaround. Kotlin 1.4 should fix this compiler bug.
 
-
 ## Write operations
 
-The following update and delete operations all have a `vararg filter: FilterPair` argument, see [find(vararg filter: FilterPair)](#find). The insert operations deserialize the Kotlin class into a MongoDB document with Jackson. 
-
+The following update and delete operations all have a `vararg filter: FilterPair` argument, see [find(vararg filter: FilterPair)](#find). The insert operations deserialize the Kotlin class into a MongoDB document with Jackson.
 
 ### updateOne
 `fun updateOne(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
@@ -218,7 +231,6 @@ In this example `CronJob::state` will always be set. Depending on `successfullyF
 
 The `update` argument is in contrast to the `filter` argument not a list of operations but a true lambda. The `update` lambda puts all [update operators](#update-operators) into a private `MutableMap<String, MutableList<MongoPair>>` inside the currently prepared `UpdateOperation` object. Therefore, all update operators like `setTo` or `incrementBy` that are called at runtime will be added to that `MutableMap`. Other update operators that are in this lambda but are not executed will therefore be not seen by the `UpdateOperation`. This API pattern is also used by the Kotlin [kotlinx.html](https://github.com/Kotlin/kotlinx.html) library and allows an idiomatic Kotlin experience while preparing the update operation. Therefore, all Kotlin language features like branches, functions and loops are available in the `update` lambda.
 
-
 ### updateMany
 `fun updateMany(vararg filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
 
@@ -227,7 +239,6 @@ The `update` argument is in contrast to the `filter` argument not a list of oper
 Updates all matched documents in the specified collection. See [updateOne](#updateone).
 
 If the `update` lambda did not call any [update operators](#update-operators), the query won't get executed on the database and will instantly return for performance reasons.
-
 
 ### updateOneAndFind
 `fun updateOneAndFind(vararg filter: FilterPair, upsert: Boolean = false, update: UpdateOperation.() -> Unit): Entry?`
@@ -240,7 +251,6 @@ Updates a single document and returns the found or inserted entry instead of the
 * If `upsert` is set and no document can be found for the query a new document is created in the MongoDB collection. The new document has all fields set that are either specified in the `filter` or that are set in the `update` lambda. See [MongoDB upsert behavior](https://docs.mongodb.com/manual/reference/method/db.collection.update/#upsert-behavior) for details. Note that the inserted document might therefore lack certain fields that would have been added to the document if `insertOne` with an actual Kotlin model object would have been used. This schemaless behavior is native to MongoDB and might at first be confusing when coming from a traditional SQL background. Katerbase only wraps that MongoDB behavior, please check out the MongoDB documentation for further details on that. Section [missing kotlin field](#missing-kotlin-field) explains how Katerbase treats then this "partial" inserted document in subsequent calls.
 
 If a new document gets created, the `setOnInsert` operator might help.
-
 
 ### updateOneOrInsert
 `fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit): UpdateResult`
@@ -262,14 +272,13 @@ col.updateOneOrInsert(User::_id equal "user_id") {
 ```
 If the user with the given `_id` already exists, only `lastSignIn` will be updated in the corresponding document. But if the user did not exist, a new user will get created, the final document is then `{_id: "user_id", lastSignIn: date, signUp: date}`.
 
-
 ### insertOne
 `insertOne(document: Entry, upsert: Boolean): Unit` and
 `fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): Unit`
 
 [db.collection.insertOne()](https://docs.mongodb.com/manual/reference/method/db.collection.insertOne/) and [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation
 
-Inserts the provided document. See section [type mapping](#type-mapping) for Kotlin serialization details. 
+Inserts the provided document. See section [type mapping](#type-mapping) for Kotlin serialization details.
 
 If you want to insert multiple documents at once, use `bulkWrite { documents.foreEach { insertOne(it) } }`, see [bulk operations](#bulk-operations).
 
@@ -292,21 +301,18 @@ col.insertOne(User().apply {
 
 Three different `insertOne` calls can be used, depending on the required use case:
 
-
 #### upsert on duplicate _id
 When calling `insertOne(document = Book().apply { _id = "the_hobbit"; authorName = "X" }, upsert = true)` and a document with the _id "the_hobbit" already exists, the given document will get replaced. Katerbase uses in that case the [db.collection.replaceOne(filter, replacement, options)](https://docs.mongodb.com/manual/reference/method/db.collection.replaceOne/) MongoDB operation with `upsert: true` parameter. In this example the resulting document will have `authorName: "X"` set, no matter if the
 document previously exited in the MongoDB collection or not.
 
-This is useful if you expect that duplicates might happen, but the newer data should always be used. 
+This is useful if you expect that duplicates might happen, but the newer data should always be used.
 
 Alternatively, use [updateOneOrInsert](#updateoneorinsert) if you want to atomically either insert or update the document with fine-grained control.
-
 
 #### throw on duplicate _id
 When calling `insertOne(document = Book().apply { _id = "the_hobbit" }, upsert = false)` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead, a `DuplicateKeyException` will be thrown.
 
 This is useful when you do not expect that duplicates will happen. [Failing fast can reduce debugging’s cost and pain significantly](https://www.martinfowler.com/ieeeSoftware/failFast.pdf).
-
 
 #### handle duplicate _id in Kotlin
 When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplicateKey: { ... })` and a document with the _id "the_hobbit" already exists, the document won't get updated. Instead, the `onDuplicateKey` lambda gets called.
@@ -314,7 +320,6 @@ When calling `insertOne(document: Book().apply { _id = "the_hobbit" }, onDuplica
 This is useful if you expect that duplicates might happen, and you can resolve that duplicates on your own by writing Kotlin code and e.g. use an [updateOne](#updateone) operation in the `onDuplicateKey` lambda.
 
 Note that the `onDuplicateKey` lambda is not atomically executed, but called after MongoDB finishes the `insertOne` call. If you can achieve an atomic update query without the need of custom Kotlin logic use [updateOneOrInsert](#updateoneorinsert) instead.
-
 
 ### findOneOrInsert
 `fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry`
@@ -350,7 +355,6 @@ val book = collection.findOneOrInsert(Book::name equal "The Hobbit", Book::autho
 In this example, `book._name` is always "The Hobbit" and `book.author` is always "Tokien", no matter if the document was inserted or already existed.
 `book._id` is "the_new_inserted_hobbit" in case the document was just inserted, or whatever it was before in case it already existed.
 
-
 ### deleteOne
 `fun deleteOne(vararg filter: FilterPair): DeleteResult`
 
@@ -359,7 +363,6 @@ In this example, `book._name` is always "The Hobbit" and `book.author` is always
 Deletes a single document from the collection. The filter must not be empty, otherwise an undefined document will be deleted.
 
 The returned [DeleteResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/DeleteResult.html) holds information about the number of documents deleted, which can be 0 in case no document matched the given query.
-
 
 #### deleteMany
 `fun deleteMany(vararg filter: FilterPair): DeleteResult`
@@ -370,14 +373,12 @@ Deletes a single document from the collection. In case the filter is empty, all 
 
 The returned [DeleteResult](https://mongodb.github.io/mongo-java-driver/3.12/javadoc/com/mongodb/client/result/DeleteResult.html) holds information about the number of documents deleted.
 
-
 ### drop
 `col.drop() -> Unit`
 
 [db.collection.drop()](https://docs.mongodb.com/manual/reference/method/db.collection.drop/) MongoDB operation
 
 Removes a collection from the database. As long as Katerbase is not initialized with `autoManageCollectionsAndIndexes = false`, the collection will be automatically created next time the `MongoDatabase` is initialized with Katerbase.
-
 
 ### clear
 `col.clear() -> Unit`
@@ -476,7 +477,6 @@ MongoDB [here](https://www.mongodb.com/docs/manual/reference/method/Session.star
 * none
 * child
 
-
 ## Update operators
 * setTo
 * unset
@@ -490,7 +490,6 @@ MongoDB [here](https://www.mongodb.com/docs/manual/reference/method/Session.star
 * pullWhere
 * child
 * childWithCursor
-
 
 ## Bulk operations
 `fun bulkWrite(options: BulkWriteOptions = BulkWriteOptions(), action: BulkOperation.() -> Unit): BulkWriteResult`
@@ -526,7 +525,6 @@ col.bulkWrite {
   models.add(UpdateManyModel<Book>(filter, update, options))
 }
 ```
-
 
 ### Indexes
 `fun index(vararg index: Bson, partialIndex: Array<FilterPair>? = null, indexOptions: (IndexOptions.() -> Unit)? = null)`
@@ -595,11 +593,9 @@ Deprecated BSON types are not supported by Katerbase and are here omitted.
 
 [MongoDB field names](https://docs.mongodb.com/manual/core/document/#field-names) must be of type String, therefore nested Maps must be of the type `Map<String, *>`. Collections can be `List<*>`, `Set<*>` or any other collection that is serializable and deserializable by Jackson. `*` must be a Kotlin type listed in the table above.
 
-
 #### Kotlin fields
 
 By using the [@Transient](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.jvm/-transient/) field annotation, a field can be marked as to be ignored on serialization, therefore it won't get stored in the MongoDB document. [Getters and setters](https://kotlinlang.org/docs/reference/properties.html#getters-and-setters) won't get serialized or deserialized by Katerbase. Also, functions within the Kotlin model class will be ignored by the serialization and deserialization. All kind of field visibility modifiers are acceptable, so it does not matter if a field of a Kotlin model is `public`, `internal`, `protected` or `private`.
-
 
 #### Missing Kotlin field
 
@@ -607,23 +603,19 @@ MongoDB collections can be [schemaless](https://www.mongodb.com/blog/post/why-sc
 
 A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [], website: "https://example.org"}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[])`.
 
-
 #### Additional Kotlin field
 
 In case the MongoDB document does not have a property value that is defined in the Kotlin model, respectively the MongoDB property is `undefined`, the **default field value** will be used. This is useful when adding fields to Kotlin models if the MongoDB documents are not yet migrated.
 
 A [Movie](#collection-setup) MongoDB document `{_id: "first", actors: [{name: "actorname"}, {birthday: ISODate(0)}]}` will get deserialized into the Kotlin class `Movie(_id=first, actors=[Actor(name=actorname, birthday=null), Actor(name=, birthday=Date(0))])`.
 
-
 #### Null and undefined
 
 All Kotlin field values can be nullable, in that case `null` will be stored in the MongoDB document. MongoDB supports two nullable JavaScript types: `undefined` and `null`. If a field in a MongoDB document is `undefined` the behavior described in [additional Kotlin field](#additional-kotlin-field) applies. If a MongoDB document field value is `null` then it is either deserialized to the Kotlin `null` type in case of non-primitive types (e.g. `String?` or `User?`) or to `0`/`0.0` in case of [primitive types](https://kotlinlang.org/docs/tutorials/kotlin-for-py/primitive-data-types-and-their-limitations.html). This is a known limitation that happens because of the Jackson deserialization, a later field access in Kotlin will fail then with a `NullPointerException` on object types.
 
-
 #### Open classes / sealed classes
 
 At the moment, you can create an open/sealed MongoDb class entity by adding `@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS` before the class declaration. This annotation is used to serialize information about the actual class of polymorphic instances. Jackson will then deserialize the class accordingly.
-
 
 ## Project state
 Katerbase evolved from a few extensions functions that were created in December 2016 to a bunch of internally used MongoDB utility functions. The utility functions are currently used at [Moshbit](https://moshbit.com) in several projects. In 2019, we decided to create a standalone library out of the proofed mongo-java-driver wrapper functions. The library design was adapted several times to provide the goal of Katerbase: Writing concise and simple MongoDB queries without any boilerplate or ceremony. Many thanks to [@functionaldude](https://github.com/functionaldude) for all the long design discussions that lead into the current state of the project.

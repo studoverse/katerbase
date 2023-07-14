@@ -1,5 +1,4 @@
 import com.moshbit.katerbase.*
-import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
@@ -39,7 +38,7 @@ class MoviesExample {
   }
 
   @Test
-  fun `01 sign up`() = runBlocking {
+  fun `01 sign up`() {
     assertNull(database.getCollection<User>().findOne(User::email equal "john.doe@example.com"))
     assertEquals(0, database.getCollection<User>().find(User::email equal "john.doe@example.com").count())
 
@@ -53,7 +52,7 @@ class MoviesExample {
   }
 
   @Test
-  fun `02 sign in`() = runBlocking {
+  fun `02 sign in`() {
     val signInDate = Date()
 
     // Set user.lastSignIn
@@ -83,7 +82,7 @@ class MoviesExample {
   }
 
   @Test
-  fun `03 sign in - update result`() = runBlocking {
+  fun `03 sign in - update result`() {
     val signInDate = Date()
 
     assertEquals(0, database.getCollection<User>().find(User::lastSignIn greaterEquals signInDate).count())
