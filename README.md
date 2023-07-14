@@ -65,7 +65,7 @@ var database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
 }.connect()
 ```
 
-Use the `clientSettings` argument of the `MongoDatabase` create() function to configure the `MongoClientSettings` of the
+Use the `clientSettings` argument of the `MongoDatabase` constructor to configure the `MongoClientSettings` of the
 mongo-kotlin-driver,
 see [Specify MongoClient Settings](https://www.mongodb.com/docs/drivers/kotlin/coroutine/current/fundamentals/connection/mongoclientsettings/).
 
@@ -473,7 +473,7 @@ holds information about the number of documents deleted.
 [db.collection.drop()](https://www.mongodb.com/docs/manual/reference/method/db.collection.drop/) MongoDB operation
 
 Removes a collection from the database. As long as Katerbase is not initialized with `autoManageCollectionsAndIndexes = false`, the
-collection will be automatically created next time the `MongoDatabase` is initialized with Katerbase.
+collection will be automatically created next time the `MongoDatabase` is connected with Katerbase.
 
 ### clear
 
