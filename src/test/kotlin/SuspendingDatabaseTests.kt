@@ -742,8 +742,8 @@ class SuspendingDatabaseTests {
 
     @BeforeAll
     @JvmStatic
-    fun setup(): Unit = runBlocking {
-      testDb = MongoDatabase.create("mongodb://localhost:27017/local") {
+    fun setup() = runBlocking {
+      testDb = MongoDatabase("mongodb://localhost:27017/local") {
         collection<EnumMongoPayload>("enumColl") {
           index(EnumMongoPayload::value1.ascending())
           index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
@@ -756,7 +756,7 @@ class SuspendingDatabaseTests {
         collection<SimpleMongoPayload>("simpleMongoColl")
         collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
         collection<OpenClassMongoPayload>("simpleMongoColl")
-      }
+      }.connect()
     }
   }
 }

@@ -106,7 +106,7 @@ class MoviesExample {
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {
-      database = MongoDatabase.create("mongodb://localhost:27017/moviesDatabase") {
+      database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
         collection<Movie>("movies") {
           index(Movie::name.textIndex())
         }
@@ -121,7 +121,7 @@ class MoviesExample {
           )
         }
         collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
-      }
+      }.connect()
       // For testing purposes, clean all data
       database.getCollection<User>().deleteMany()
       database.getCollection<Movie>().deleteMany()

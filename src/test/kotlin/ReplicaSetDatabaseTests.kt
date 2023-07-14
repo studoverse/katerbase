@@ -1,5 +1,6 @@
 import ReplicaSetDatabaseTests.Companion.testDb
 import com.moshbit.katerbase.MongoDatabase
+import com.moshbit.katerbase.connectBlocking
 import com.moshbit.katerbase.equal
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions
@@ -74,24 +75,23 @@ class ReplicaSetDatabaseTests {
 
     @BeforeAll
     @JvmStatic
-    fun setup(): Unit = runBlocking {
-      testDb =
-        MongoDatabase.create(
-          uri = "mongodb://server1:27027,server2:27037/testDb?replicaSet=local-rs&readPreference=primary&serverSelectionTimeoutMS=5000&connectTimeoutMS=10000",
-          supportChangeStreams = true,
-        ) {
-          collection<EnumMongoPayload>("enumColl") {
-            index(EnumMongoPayload::value1.ascending())
-            index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
-            index(
-              EnumMongoPayload::nullableString.ascending(), partialIndex = arrayOf(
-                EnumMongoPayload::nullableString equal null
-              )
+    fun setup() {
+      testDb = MongoDatabase(
+        uri = "mongodb://server1:27027,server2:27037/testDb?replicaSet=local-rs&readPreference=primary&serverSelectionTimeoutMS=5000&connectTimeoutMS=10000",
+        supportChangeStreams = true,
+      ) {
+        collection<EnumMongoPayload>("enumColl") {
+          index(EnumMongoPayload::value1.ascending())
+          index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
+          index(
+            EnumMongoPayload::nullableString.ascending(), partialIndex = arrayOf(
+              EnumMongoPayload::nullableString equal null
             )
-          }
-          collection<SimpleMongoPayload>("simpleMongoColl")
-          collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
+          )
         }
+        collection<SimpleMongoPayload>("simpleMongoColl")
+        collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
+      }.connectBlocking()
     }
   }
 }

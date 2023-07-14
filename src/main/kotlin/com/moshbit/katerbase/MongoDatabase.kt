@@ -42,21 +42,38 @@ import kotlin.reflect.KMutableProperty1
  * 6) Start the service, type "brew services start mongodb-community"
  * 7) Check if it worked using Studio 3t or just type "mongo" to open the mongo shell.
  */
-
-open class MongoDatabase private constructor(
-  val supportChangeStreams: Boolean,
+open class MongoDatabase(
+  uri: String,
+  allowReadFromSecondaries: Boolean = false,
+  useMajorityWrite: Boolean = allowReadFromSecondaries,
+  private val supportChangeStreams: Boolean = false,
+  private val autoCreateCollections: Boolean = true,
+  private val autoCreateIndexes: Boolean = true,
+  private val autoDeleteIndexes: Boolean = true,
+  clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
+  collections: MongoDatabaseDefinition.() -> Unit
 ) : AbstractMongoDatabase() {
-  protected lateinit var client: MongoClient
-  protected lateinit var internalDatabase: com.mongodb.kotlin.client.coroutine.MongoDatabase
-  protected lateinit var mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  private var connected = false
+  protected var databaseDefinition: MongoDatabaseDefinition
+  protected var client: MongoClient
+  protected var internalDatabase: com.mongodb.kotlin.client.coroutine.MongoDatabase
+  protected var mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
   protected var changeStreamClient: MongoClient? = null
-  protected lateinit var changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected var changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+
+  private fun requireConnected() {
+    require(connected) {
+      "MongoDatabase is not connected yet, so collections/indexes might not be created yet. Please call MongoDatabase.connect() first."
+    }
+  }
 
   open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): BlockingMongoCollection<T> {
+    requireConnected()
     return BlockingMongoCollection(getSuspendingCollection(entryClass))
   }
 
   open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): MongoCollection<T> {
+    requireConnected()
     @Suppress("UNCHECKED_CAST")
     return mongoCollections[entryClass] as? MongoCollection<T>
       ?: throw IllegalArgumentException("No collection exists for ${entryClass.simpleName}")
@@ -122,16 +139,7 @@ open class MongoDatabase private constructor(
     return JsonHandler.fromBson(commandResult, DatabaseStats::class)
   }
 
-  suspend fun init(
-    uri: String,
-    allowReadFromSecondaries: Boolean = false,
-    useMajorityWrite: Boolean = allowReadFromSecondaries,
-    autoCreateCollections: Boolean = true,
-    autoCreateIndexes: Boolean = true,
-    autoDeleteIndexes: Boolean = true,
-    clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
-    collections: MongoDatabaseDefinition.() -> Unit
-  ) {
+  init {
     // Disable mongo driver logging
     setLogLevel("org.mongodb", Level.ERROR)
 
@@ -157,7 +165,7 @@ open class MongoDatabase private constructor(
 
     internalDatabase = client.getDatabase(connectionString.database!!)
 
-    val databaseDefinition = MongoDatabaseDefinition().apply { collections() }
+    databaseDefinition = MongoDatabaseDefinition().apply { collections() }
 
     mongoCollections = databaseDefinition.collections.associateBy(
       keySelector = { it.modelClass },
@@ -184,6 +192,19 @@ open class MongoDatabase private constructor(
       )
     } else emptyMap()
 
+    // Validation for Jackson to avoid serialization/deserialization issues
+    mongoCollections.keys.forEach { mongoEntryClass ->
+      mongoEntryClass.java.declaredFields.forEach { field ->
+        fun errorMessage(msg: String) = "Field error in ${mongoEntryClass.simpleName} -> ${field.name}: $msg"
+        require(!field.name.startsWith("is")) { errorMessage("Can't start with 'is'") }
+        require(!field.name.startsWith("set")) { errorMessage("Can't start with 'set'") }
+        require(!field.name.startsWith("get")) { errorMessage("Can't start with 'get'") }
+      }
+    }
+  }
+
+  @Deprecated("Use connect() instead to let it return `this`.", ReplaceWith("connect()"))
+  suspend fun connectWithoutReturnParameter() {
     if (autoCreateCollections) {
       // Create collections which don't exist
       val existingCollections = internalDatabase.listCollectionNames().toSet()
@@ -251,15 +272,7 @@ open class MongoDatabase private constructor(
       }
     }
 
-    // Validation for Jackson to avoid serialization/deserialization issues
-    mongoCollections.keys.forEach { mongoEntryClass ->
-      mongoEntryClass.java.declaredFields.forEach { field ->
-        fun errorMessage(msg: String) = "Field error in ${mongoEntryClass.simpleName} -> ${field.name}: $msg"
-        require(!field.name.startsWith("is")) { errorMessage("Can't start with 'is'") }
-        require(!field.name.startsWith("set")) { errorMessage("Can't start with 'set'") }
-        require(!field.name.startsWith("get")) { errorMessage("Can't start with 'get'") }
-      }
-    }
+    connected = true
   }
 
   data class PayloadChange<Entry : MongoMainEntry>(
@@ -1084,33 +1097,6 @@ open class MongoDatabase private constructor(
     var logAllQueries = false // Set this to true if you want to debug your database queries
     private fun Document.asJsonString() = JsonHandler.toJsonString(this)
 
-    suspend fun create(
-      uri: String,
-      allowReadFromSecondaries: Boolean = false,
-      useMajorityWrite: Boolean = allowReadFromSecondaries,
-      supportChangeStreams: Boolean = false,
-      autoCreateCollections: Boolean = true,
-      autoCreateIndexes: Boolean = true,
-      autoDeleteIndexes: Boolean = true,
-      clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
-      collections: MongoDatabaseDefinition.() -> Unit
-    ): MongoDatabase {
-      return MongoDatabase(
-        supportChangeStreams = supportChangeStreams
-      ).apply {
-        init(
-          uri = uri,
-          allowReadFromSecondaries = allowReadFromSecondaries,
-          useMajorityWrite = useMajorityWrite,
-          autoCreateCollections = autoCreateCollections,
-          autoCreateIndexes = autoCreateIndexes,
-          autoDeleteIndexes = autoDeleteIndexes,
-          clientSettings = clientSettings,
-          collections = collections
-        )
-      }
-    }
-
     private val defaultWatchPipeline
       get() = Document().apply {
         this["\$match"] = Document().apply {
@@ -1159,6 +1145,22 @@ open class MongoDatabase private constructor(
         }
         .build()
         .let { MongoClient.create(it) }
+    }
+  }
+}
+
+suspend fun <T : MongoDatabase> T.connect(): T {
+  return this.apply {
+    @Suppress("DEPRECATION")
+    connectWithoutReturnParameter()
+  }
+}
+
+fun <T : MongoDatabase> T.connectBlocking(): T {
+  return this.apply {
+    runBlocking {
+      @Suppress("DEPRECATION")
+      connectWithoutReturnParameter()
     }
   }
 }

@@ -19,11 +19,11 @@ class Book : MongoMainEntry() {
   var yearPublished: Int? = null
 }
 
-val database = MongoDatabase.create("mongodb://localhost:27017/booksDatabase") {
+val database = MongoDatabase("mongodb://localhost:27017/booksDatabase") {
   collection<Book>("books") {
     index(Book::yearPublished.ascending())
   }
-}
+}.connect()
 
 // You can use database.getCollection<Book>() to get a blocking collection, in case your codebase doesn't use Kotlin coroutines.
 val col = database.getSuspendingCollection<Book>()
@@ -53,7 +53,7 @@ Check out the Katerbase [read operations](#read-operations) and [write operation
 
 A MongoDB database with all its collections is defined in code. When creating a Katerbase MongoDatabase object, the connection URI must be specified along with the collection definitions:
 ```kotlin
-var database = MongoDatabase.create("mongodb://localhost:27017/moviesDatabase") {
+var database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
   collection<Movie>("movies") {
     index(Movie::name.textIndex())
   }
@@ -62,7 +62,7 @@ var database = MongoDatabase.create("mongodb://localhost:27017/moviesDatabase") 
     index(User::ratings.child(User.MovieRating::date).ascending())
   }
   collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
-}
+}.connect()
 ```
 
 Use the `clientSettings` argument of the `MongoDatabase` create() function to configure the `MongoClientSettings` of the
@@ -75,7 +75,7 @@ the MongoDatabase of the mongo-kotlin-driver to allow all operations that Katerb
 ### Collection Setup
 
 Each MongoDB database consists of multiple MongoDB collections. To create a collection, add the MongoDB collection name and the
-corresponding Kotlin model class to the `collection` argument of the `MongoDatabase.create()` function,
+corresponding Kotlin model class to the `collection` argument of the `MongoDatabase` constructor,
 see [database setup](#database-setup). As long as `autoManageCollectionsAndIndexes` is not disabled, Katerbase will automatically create the
 defined collection.
 
@@ -664,7 +664,7 @@ code, make sure you update the corresponding indexOption also in MongoDB or dele
 index.
 
 All specified indexes will be automatically created by Katerbase when `autoManageCollectionsAndIndexes` is set in
-the `MongoDatabase.create()` function. The default value is `true`, so in case you do not want to manage your MongoDB collections and
+the `MongoDatabase` constructor. The default value is `true`, so in case you do not want to manage your MongoDB collections and
 indexes via Katerbase set `autoManageCollectionsAndIndexes` to `false`. If set to false, no collections are created or deleted and no
 indexes get created or deleted by Katerbase. This mode can be useful if you manage the collections and indexes not in the project where
 Katerbase is used but on another project. Also if you start multiple JVM executables with Katerbase concurrently, make sure that only one
@@ -672,7 +672,7 @@ executable has `autoManageCollectionsAndIndexes` enabled, since the management o
 
 ```kotlin
 database =
-  MongoDatabase.create("mongodb://localhost:27017/moviesDatabase", autoManageCollectionsAndIndexes = false, collections = { /* ... */ })
+  MongoDatabase("mongodb://localhost:27017/moviesDatabase", autoManageCollectionsAndIndexes = false, collections = { /* ... */ }).connect()
 ```
 
 ### Type mapping
