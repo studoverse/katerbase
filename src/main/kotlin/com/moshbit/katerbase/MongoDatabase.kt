@@ -57,9 +57,9 @@ open class MongoDatabase(
   protected var databaseDefinition: MongoDatabaseDefinition
   protected var client: MongoClient
   protected var internalDatabase: com.mongodb.kotlin.client.coroutine.MongoDatabase
-  protected var mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected var mongoCollections: Map<KClass<out MongoMainEntry>, SuspendingMongoCollection<out MongoMainEntry>>
   protected var changeStreamClient: MongoClient? = null
-  protected var changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected var changeStreamCollections: Map<KClass<out MongoMainEntry>, SuspendingMongoCollection<out MongoMainEntry>>
 
   private fun requireConnected() {
     require(connected) {
@@ -67,15 +67,15 @@ open class MongoDatabase(
     }
   }
 
-  open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): BlockingMongoCollection<T> {
+  open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     requireConnected()
-    return BlockingMongoCollection(getSuspendingCollection(entryClass))
+    return MongoCollection(getSuspendingCollection(entryClass))
   }
 
-  open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): MongoCollection<T> {
+  open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
     requireConnected()
     @Suppress("UNCHECKED_CAST")
-    return mongoCollections[entryClass] as? MongoCollection<T>
+    return mongoCollections[entryClass] as? SuspendingMongoCollection<T>
       ?: throw IllegalArgumentException("No collection exists for ${entryClass.simpleName}")
   }
 
@@ -116,19 +116,20 @@ open class MongoDatabase(
   inner class TransactionalDatabase : AbstractMongoDatabase() {
     lateinit var session: ClientSession
 
-    inner class TransactionalCollection<Entry : MongoMainEntry>(mongoCollection: MongoCollection<Entry>) : MongoCollection<Entry>(
-      internalCollection = mongoCollection.internalCollection,
-      entryClass = mongoCollection.entryClass,
-      session = session,
-      indexes = emptyList(), // Indexes are already created so no need to declare them here.
-    )
+    inner class TransactionalCollection<Entry : MongoMainEntry>(suspendingMongoCollection: SuspendingMongoCollection<Entry>) :
+      SuspendingMongoCollection<Entry>(
+        internalCollection = suspendingMongoCollection.internalCollection,
+        entryClass = suspendingMongoCollection.entryClass,
+        session = session,
+        indexes = emptyList(), // Indexes are already created so no need to declare them here.
+      )
 
-    override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): BlockingMongoCollection<T> {
-      return BlockingMongoCollection(TransactionalCollection(mongoCollection = this@MongoDatabase.getSuspendingCollection(entryClass)))
+    override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
+      return MongoCollection(TransactionalCollection(suspendingMongoCollection = this@MongoDatabase.getSuspendingCollection(entryClass)))
     }
 
-    override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): MongoCollection<T> {
-      return TransactionalCollection(mongoCollection = this@MongoDatabase.getSuspendingCollection(entryClass))
+    override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
+      return TransactionalCollection(suspendingMongoCollection = this@MongoDatabase.getSuspendingCollection(entryClass))
     }
   }
 
@@ -170,7 +171,7 @@ open class MongoDatabase(
     mongoCollections = databaseDefinition.collections.associateBy(
       keySelector = { it.modelClass },
       valueTransform = {
-        MongoCollection(
+        SuspendingMongoCollection(
           internalCollection = internalDatabase.getCollection(it.collectionName),
           entryClass = it.modelClass,
           indexes = it.indexes,
@@ -183,7 +184,7 @@ open class MongoDatabase(
       databaseDefinition.collections.associateBy(
         keySelector = { it.modelClass },
         valueTransform = {
-          MongoCollection(
+          SuspendingMongoCollection(
             internalCollection = changeStreamClientDatabase.getCollection(it.collectionName),
             entryClass = it.modelClass,
             indexes = it.indexes,
@@ -283,7 +284,7 @@ open class MongoDatabase(
   )
 
   // Mongo collection wrapper for Kotlin
-  open inner class MongoCollection<Entry : MongoMainEntry>(
+  open inner class SuspendingMongoCollection<Entry : MongoMainEntry>(
     val internalCollection: com.mongodb.kotlin.client.coroutine.MongoCollection<Document>,
     val entryClass: KClass<Entry>,
     val session: ClientSession? = null,
@@ -467,7 +468,7 @@ open class MongoDatabase(
     }
 
     private fun Document.toClass() = JsonHandler.fromBson(this, entryClass)
-    private fun FindFlow<Document>.toClasses() = FlowFindCursor(this, entryClass, this@MongoCollection)
+    private fun FindFlow<Document>.toClasses() = FlowFindCursor(this, entryClass, this@SuspendingMongoCollection)
 
     // Returns a MongoDocument as a list of mutators. Useful if you want to set all values in an update block.
     // In case _id should be included in the mutator, set withId to true.
@@ -967,8 +968,8 @@ open class MongoDatabase(
     }
   }
 
-  inner class BlockingMongoCollection<Entry : MongoMainEntry>(
-    val suspendingCollection: MongoCollection<Entry>
+  inner class MongoCollection<Entry : MongoMainEntry>(
+    val suspendingCollection: SuspendingMongoCollection<Entry>
   ) {
     val name: String get() = suspendingCollection.name
     val entryClass: KClass<Entry> get() = suspendingCollection.entryClass
@@ -993,7 +994,7 @@ open class MongoDatabase(
 
     fun bulkWrite(
       options: BulkWriteOptions = BulkWriteOptions(),
-      action: MongoCollection<Entry>.BulkOperation.() -> Unit
+      action: SuspendingMongoCollection<Entry>.BulkOperation.() -> Unit
     ): BulkWriteResult {
       return runBlocking { suspendingCollection.bulkWrite(options, action) }
     }
@@ -1044,11 +1045,11 @@ open class MongoDatabase(
       return distinct(distinctField, T::class, *filter)
     }
 
-    fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+    fun updateOne(vararg filter: FilterPair, update: SuspendingMongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
       return runBlocking { suspendingCollection.updateOne(*filter, update = update) }
     }
 
-    fun updateOneOrInsert(filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+    fun updateOneOrInsert(filter: FilterPair, update: SuspendingMongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
       return runBlocking { suspendingCollection.updateOneOrInsert(filter, update = update) }
     }
 
@@ -1056,7 +1057,7 @@ open class MongoDatabase(
       vararg filter: FilterPair,
       upsert: Boolean = false,
       returnDocument: ReturnDocument = ReturnDocument.AFTER,
-      update: MongoCollection<Entry>.UpdateOperation.() -> Unit
+      update: SuspendingMongoCollection<Entry>.UpdateOperation.() -> Unit
     ): Entry? {
       return runBlocking {
         suspendingCollection.updateOneAndFind(
@@ -1068,7 +1069,7 @@ open class MongoDatabase(
       }
     }
 
-    fun updateMany(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
+    fun updateMany(vararg filter: FilterPair, update: SuspendingMongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
       return runBlocking { suspendingCollection.updateMany(*filter, update = update) }
     }
 

@@ -30,7 +30,7 @@ class FlowAggregateCursor<Entry : Any>(
 abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindCursor<Entry, Cursor>>(
   val flow: FindFlow<Document>,
   val clazz: KClass<Entry>,
-  val collection: MongoDatabase.MongoCollection<Entry>
+  val collection: MongoDatabase.SuspendingMongoCollection<Entry>
 ) {
   protected var limit = 0
   protected var skip = 0
@@ -72,7 +72,7 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
         ?: throw IllegalArgumentException("Index $indexName was not found in collection ${collection.name}")
     )
 
-  fun hint(index: MongoDatabase.MongoCollection<Entry>.MongoIndex): Cursor = cursor.apply {
+  fun hint(index: MongoDatabase.SuspendingMongoCollection<Entry>.MongoIndex): Cursor = cursor.apply {
     flow.hint(index.bson)
     this.hint = index.bson
   }
@@ -160,7 +160,7 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
 class FindCursor<Entry : MongoMainEntry>(
   flow: FindFlow<Document>,
   clazz: KClass<Entry>,
-  collection: MongoDatabase.MongoCollection<Entry>
+  collection: MongoDatabase.SuspendingMongoCollection<Entry>
 ) : AbstractFindCursor<Entry, FindCursor<Entry>>(flow, clazz, collection), Iterable<Entry> {
   override fun iterator() = flowForDocumentClass(flow, clazz).toBlockingIterator()
 }
@@ -192,7 +192,7 @@ internal fun <T> ChannelIterator<T>.toBlockingIterator() = object : Iterator<T> 
 class FlowFindCursor<Entry : MongoMainEntry>(
   flow: FindFlow<Document>,
   clazz: KClass<Entry>,
-  collection: MongoDatabase.MongoCollection<Entry>,
+  collection: MongoDatabase.SuspendingMongoCollection<Entry>,
 ) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(flow, clazz, collection),
   Flow<Entry> by flowForDocumentClass(flow, clazz)
 
