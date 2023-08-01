@@ -1,2 +1,3 @@
+# Synchronize JVM version with jvmToolchain in build.gradle.kts, see https://jitpack.io/docs/BUILDING/#java-version
 jdk:
   - openjdk17
