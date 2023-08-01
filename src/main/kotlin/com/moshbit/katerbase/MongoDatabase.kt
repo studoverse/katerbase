@@ -680,8 +680,8 @@ open class MongoDatabase(
     }
 
     suspend fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
-      try {
-        return if (session != null) {
+      return try {
+        if (session != null) {
           internalCollection.insertOne(session, document.toBSONDocument())
         } else {
           internalCollection.insertOne(document.toBSONDocument())
@@ -689,7 +689,7 @@ open class MongoDatabase(
       } catch (e: MongoServerException) {
         if (e.code == 11000 && e.message?.matches(Regex(".*E11000 duplicate key error collection: .* index: _id_ dup key:.*")) == true) {
           onDuplicateKey.invoke()
-          return null
+          null
         } else {
           throw e // Every other exception than duplicate key
         }
@@ -943,7 +943,7 @@ open class MongoDatabase(
         return models.add(DeleteOneModel(filter.toFilterDocument()))
       }
 
-      fun deleteMany(vararg filter: FilterPair): Unit {
+      fun deleteMany(vararg filter: FilterPair) {
         models.add(DeleteManyModel(filter.toFilterDocument()))
       }
     }
@@ -1166,10 +1166,7 @@ suspend fun <T : MongoDatabase> T.connect(): T {
 }
 
 fun <T : MongoDatabase> T.connectBlocking(): T {
-  return this.apply {
-    runBlocking {
-      @Suppress("DEPRECATION")
-      connectWithoutReturnParameter()
-    }
+  return runBlocking {
+    connect()
   }
 }
