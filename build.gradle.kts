@@ -1,5 +1,3 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 plugins {
   `maven-publish`
   kotlin("jvm") version "1.9.0"
@@ -29,10 +27,6 @@ dependencies {
   testImplementation("org.junit.jupiter:junit-jupiter:5.9.2")
 }
 
-tasks.withType<KotlinCompile> {
-  kotlinOptions.jvmTarget = "11"
-}
-
 tasks.test {
   useJUnitPlatform()
   testLogging {
@@ -41,9 +35,7 @@ tasks.test {
 }
 
 kotlin {
-  jvmToolchain {
-    languageVersion.set(JavaLanguageVersion.of("17")) // Auto-download JDK for developers
-  }
+  jvmToolchain(17) // Auto-download JDK for developers
 }
 
 publishing {
