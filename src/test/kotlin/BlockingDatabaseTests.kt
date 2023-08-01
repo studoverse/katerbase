@@ -686,6 +686,37 @@ class BlockingDatabaseTests {
     }
   }
 
+
+  @Test
+  fun bulkWrite() {
+    testDb.getCollection<EnumMongoPayload>().bulkWrite {
+      deleteMany()
+      insertOne(EnumMongoPayload().apply { _id = "bulkWrite-deleteOne" }, upsert = false)
+      insertOne(EnumMongoPayload().apply { _id = "bulkWrite-updateOne" }, upsert = false)
+      insertOne(EnumMongoPayload().apply { _id = "bulkWrite-toBeDeletedWithDeleteMany" }, upsert = false)
+      deleteOne(EnumMongoPayload::_id equal "bulkWrite-deleteOne")
+      updateOne(EnumMongoPayload::_id equal "bulkWrite-updateOne") {
+        EnumMongoPayload::stringList push "1"
+      }
+      deleteMany(EnumMongoPayload::stringList equal listOf())
+      updateMany(EnumMongoPayload::_id equal "bulkWrite-updateOne") {
+        EnumMongoPayload::stringList push "2"
+      }
+
+      updateOneOrInsert(EnumMongoPayload::_id equal "bulkWrite-updateOneOrInsert") {
+        EnumMongoPayload::stringList push "a"
+      }
+      updateOneOrInsert(EnumMongoPayload::_id equal "bulkWrite-updateOneOrInsert") {
+        EnumMongoPayload::stringList push "b"
+      }
+    }
+
+    val elements = testDb.getCollection<EnumMongoPayload>().find().toList()
+    assertEquals(setOf("bulkWrite-updateOne", "bulkWrite-updateOneOrInsert"), elements.map { it._id }.toSet())
+    assertEquals(listOf("1", "2"), elements.single { it._id == "bulkWrite-updateOne" }.stringList)
+    assertEquals(listOf("a", "b"), elements.single { it._id == "bulkWrite-updateOneOrInsert" }.stringList)
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 

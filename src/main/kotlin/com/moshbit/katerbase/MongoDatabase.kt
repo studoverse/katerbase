@@ -930,6 +930,14 @@ open class MongoDatabase(
         }
       }
 
+      fun updateOneOrInsert(filter: FilterPair, update: UpdateOperation.() -> Unit) {
+        require(filter.key.name == "_id") {
+          "An _id filter must be provided when interacting with only one object and no other filters are allowed to mitigate a DuplicateKeyException on update."
+        }
+        val mutator = UpdateOperation().apply { update(this) }.mutator
+        models.add(UpdateOneModel(arrayOf(filter).toFilterDocument(), mutator, UpdateOptions().upsert(true)))
+      }
+
       fun deleteOne(vararg filter: FilterPair): Boolean {
         require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
         return models.add(DeleteOneModel(filter.toFilterDocument()))
