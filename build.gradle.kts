@@ -17,10 +17,10 @@ dependencies {
 
   implementation("org.mongodb:mongodb-driver-kotlin-coroutine:4.10.1")
 
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
 
-  implementation("com.fasterxml.jackson.core:jackson-core:2.14.2")
-  implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.14.2")
+  implementation("com.fasterxml.jackson.core:jackson-core:2.15.2")
+  implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.15.2")
 
   implementation("ch.qos.logback:logback-classic:1.2.11")
 
