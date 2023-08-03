@@ -6,11 +6,14 @@ import com.mongodb.client.model.Sorts
 import com.mongodb.kotlin.client.coroutine.AggregateFlow
 import com.mongodb.kotlin.client.coroutine.DistinctFlow
 import com.mongodb.kotlin.client.coroutine.FindFlow
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.ChannelIterator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.produceIn
+import kotlinx.coroutines.runBlocking
 import org.bson.BsonDocument
 import org.bson.BsonInt32
 import org.bson.Document
@@ -52,18 +55,18 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
 
   /* Limit number of returned objects */
   fun limit(limit: Int): Cursor = cursor.apply {
-    flow.limit(limit)
     this.limit = limit
+    flow.limit(limit)
   }
 
   fun skip(skip: Int): Cursor = cursor.apply {
-    flow.skip(skip)
     this.skip = skip
+    flow.skip(skip)
   }
 
   fun batchSize(batchSize: Int): Cursor = cursor.apply {
-    flow.batchSize(batchSize)
     this.batchSize = batchSize
+    flow.batchSize(batchSize)
   }
 
   fun hint(indexName: String): Cursor =
@@ -73,12 +76,13 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
     )
 
   fun hint(index: MongoDatabase.SuspendingMongoCollection<Entry>.MongoIndex): Cursor = cursor.apply {
-    flow.hint(index.bson)
     this.hint = index.bson
+    flow.hint(index.bson)
   }
 
   @DirectMongoFieldAccess
   fun projection(bson: Bson): Cursor = cursor.apply {
+    this.projection(bson)
     flow.projection(bson)
   }
 
@@ -97,22 +101,22 @@ abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindC
 
   @DirectMongoFieldAccess
   fun sort(bson: Bson): Cursor = cursor.apply {
-    flow.sort(bson)
     this.sort = bson
+    flow.sort(bson)
   }
 
   fun <T> sortByDescending(field: MongoEntryField<T>): Cursor = cursor.apply {
     val fieldName = field.toMongoField().name
     val bson = Sorts.descending(fieldName)
-    flow.sort(bson)
     this.sort = bson
+    flow.sort(bson)
   }
 
   fun <T> sortBy(field: MongoEntryField<T>): Cursor = cursor.apply {
     val fieldName = field.toMongoField().name
     val bson = Sorts.ascending(fieldName)
-    flow.sort(bson)
     this.sort = bson
+    flow.sort(bson)
   }
 
   override fun equals(other: Any?): Boolean {
@@ -171,7 +175,7 @@ class DistinctCursor<T : Any>(
   override fun iterator() = flow.toBlockingIterator()
 }
 
-@OptIn(FlowPreview::class, DelicateCoroutinesApi::class)
+@OptIn(DelicateCoroutinesApi::class)
 internal fun <T> Flow<T>.toBlockingIterator(scope: CoroutineScope = GlobalScope): Iterator<T> {
   return this
     .produceIn(scope)
