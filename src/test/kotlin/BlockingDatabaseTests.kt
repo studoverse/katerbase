@@ -42,7 +42,7 @@ class BlockingDatabaseTests {
     // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumList
 
     testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumList")
-    runBlocking {
+    runBlocking { // internalCollection is suspending
       testDb.getCollection<EnumMongoPayload>().suspendingCollection.internalCollection.insertOne(
         Document(
           listOf(
@@ -69,7 +69,7 @@ class BlockingDatabaseTests {
     // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumSet
 
     testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumSet")
-    runBlocking {
+    runBlocking { // internalCollection is suspending
       testDb.getCollection<EnumMongoPayload>().suspendingCollection.internalCollection.insertOne(
         Document(
           setOf(
@@ -471,8 +471,8 @@ class BlockingDatabaseTests {
   }
 
   @Test
-  fun suspendingFindTest() = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
+  fun findTest() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { clear() }
 
     val payloads = (1..50)
       .map {
@@ -483,7 +483,7 @@ class BlockingDatabaseTests {
       }
       .onEach { collection.insertOne(it, upsert = false) }
 
-    collection.find().collect { payload ->
+    collection.find().forEach { payload ->
       assert(payloads.any { it._id == payload._id })
     }
   }
@@ -534,6 +534,7 @@ class BlockingDatabaseTests {
 
   @Test
   fun dbStats() {
+    // getDatabaseStats are suspending
     val stats = runBlocking { testDb.getDatabaseStats() }
     assert(stats.collections > 0)
   }

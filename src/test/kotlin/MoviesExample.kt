@@ -1,5 +1,4 @@
 import com.moshbit.katerbase.*
-import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.MethodOrderer
@@ -105,7 +104,7 @@ class MoviesExample {
 
     @BeforeAll
     @JvmStatic
-    fun setup(): Unit = runBlocking {
+    fun setup() {
       database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
         collection<Movie>("movies") {
           index(Movie::name.textIndex())
@@ -121,7 +120,7 @@ class MoviesExample {
           )
         }
         collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
-      }.connect()
+      }.connectBlocking()
       // For testing purposes, clean all data
       database.getCollection<User>().deleteMany()
       database.getCollection<Movie>().deleteMany()

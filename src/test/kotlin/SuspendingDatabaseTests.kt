@@ -474,7 +474,7 @@ class SuspendingDatabaseTests {
   }
 
   @Test
-  fun suspendingFindTest(): Unit = runBlocking {
+  fun findTest(): Unit = runBlocking {
     val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
 
     val payloads = (1..50)
