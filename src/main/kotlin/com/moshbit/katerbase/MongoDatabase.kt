@@ -982,6 +982,13 @@ open class MongoDatabase(
     val name: String get() = suspendingCollection.name
     val entryClass: KClass<Entry> get() = suspendingCollection.entryClass
 
+    private fun requireNotOnCoroutine() {
+      if (Thread.currentThread().name.contains(" @coroutine#")) {
+        // TODO Throw instead of just printing
+        Exception("Please use the suspending collection instead of the blocking one when inside a coroutine. Otherwise we might end up in a deadlock.").printStackTrace()
+      }
+    }
+
     fun watch(pipeline: Document = defaultWatchPipeline, action: (Result<PayloadChange<Entry>>) -> Unit) {
       suspendingCollection.watch(pipeline) { change ->
         runBlocking { action(change) }
@@ -1008,6 +1015,7 @@ open class MongoDatabase(
     }
 
     fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): AggregateCursor<T> {
+      requireNotOnCoroutine()
       val cursor = suspendingCollection.aggregate(pipeline, entryClass)
       return AggregateCursor(cursor.aggregateFlow, entryClass)
     }
@@ -1027,6 +1035,7 @@ open class MongoDatabase(
     }
 
     fun find(vararg filter: FilterPair): FindCursor<Entry> {
+      requireNotOnCoroutine()
       return runBlocking {
         val cursor = suspendingCollection.find(*filter)
         FindCursor(cursor.flow, cursor.clazz, cursor.collection)
@@ -1046,6 +1055,7 @@ open class MongoDatabase(
      * More info: https://docs.mongodb.com/manual/reference/method/db.collection.distinct/
      */
     fun <T : Any> distinct(distinctField: MongoEntryField<T>, entryClass: KClass<T>, vararg filter: FilterPair): DistinctCursor<T> {
+      requireNotOnCoroutine()
       return DistinctCursor(suspendingCollection.distinct(distinctField, entryClass, filter = filter))
     }
 

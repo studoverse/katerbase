@@ -718,6 +718,29 @@ class BlockingDatabaseTests {
     assertEquals(listOf("a", "b"), elements.single { it._id == "bulkWrite-updateOneOrInsert" }.stringList)
   }
 
+  /* This testcase would currently result in a deadlock. Resolution strategies:
+      - Use getSuspendingCollection() when doing a find()/distinct()/aggregate() inside a coroutine.
+      - Fix katerbase by rewriting the toBlockingIterator() function.
+  @Test
+  fun runBlockingCallInsideCoroutines() {
+    testDb.getCollection<EnumMongoPayload>().find().toList().count()
+    val finished = false
+    thread {
+      Thread.sleep(1000)
+      assertTrue(finished, "All coroutines should have finished by now")
+    }
+    val scope = CoroutineScope(Dispatchers.Default)
+    testDb.getCollection<EnumMongoPayload>().deleteMany()
+    runBlocking {
+      (0..100).map {
+        scope.launch {
+          assertEquals(0, testDb.getCollection<EnumMongoPayload>().find().toList().count())
+        }
+      }.joinAll()
+      finished
+    }
+  }*/
+
   companion object {
     lateinit var testDb: MongoDatabase
 
