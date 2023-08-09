@@ -119,17 +119,8 @@ object JsonHandler {
 
   fun <T : Any> toBsonDocument(payload: T): Document = mongoJacksonMapper.convertValue(payload, Document::class.java)
 
-  @Deprecated("Use new", ReplaceWith("convert(payload, kClass)"))
-  fun <T : Any, R : Any> convertValue(payload: T, kClass: KClass<R>): R = convert(payload, kClass)
-
-  @Deprecated("Use new", ReplaceWith("convert(payload, R::class)"))
-  inline fun <reified R : Any> convertValue(payload: Any): R = convert(payload, R::class)
-
   fun <T : Any, R : Any> convert(payload: T, kClass: KClass<R>): R = mongoJacksonMapper.convertValue(payload, kClass.java)
   inline fun <reified R : Any> convert(payload: Any): R = convert(payload, R::class)
-
-  @Deprecated("Use new", ReplaceWith("convertList(payload, kClass)"))
-  fun <T : Any, R : Any> convertValueList(payload: T, kClass: KClass<R>): List<R> = convertList(payload, kClass)
 
   fun <T : Any, R : Any> convertList(payload: T, kClass: KClass<R>): List<R> =
     mongoJacksonMapper.convertValue(payload, mongoJacksonMapper.constructCollectionType(kClass))

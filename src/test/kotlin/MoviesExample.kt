@@ -102,7 +102,6 @@ class MoviesExample {
   companion object {
     lateinit var database: MongoDatabase
 
-    @Suppress("unused")
     @BeforeAll
     @JvmStatic
     fun setup() {
@@ -121,7 +120,7 @@ class MoviesExample {
           )
         }
         collection<SignIn>("signInLogging", collectionSizeCap = 1024L * 1024L) // 1MB
-      }
+      }.connectBlocking()
       // For testing purposes, clean all data
       database.getCollection<User>().deleteMany()
       database.getCollection<Movie>().deleteMany()

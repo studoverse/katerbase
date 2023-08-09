@@ -42,16 +42,18 @@ class BlockingDatabaseTests {
     // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumList
 
     testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumList")
-    testDb.getCollection<EnumMongoPayload>().internalCollection.insertOne(
-      Document(
-        listOf(
-          "_id" to "faultyEnumList",
-          "enumList" to listOf(
-            "VALUE1", "FAULTY", null, "VALUE3"
-          )
-        ).toMap()
+    runBlocking { // internalCollection is suspending
+      testDb.getCollection<EnumMongoPayload>().suspendingCollection.internalCollection.insertOne(
+        Document(
+          listOf(
+            "_id" to "faultyEnumList",
+            "enumList" to listOf(
+              "VALUE1", "FAULTY", null, "VALUE3"
+            )
+          ).toMap()
+        )
       )
-    )
+    }
 
     val result = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumList")
 
@@ -67,16 +69,18 @@ class BlockingDatabaseTests {
     // Enum value FAULTY of type Enum1 doesn't exists any more but still present in database: EnumMongoPayload, _id=faultyEnumSet
 
     testDb.getCollection<EnumMongoPayload>().deleteOne(EnumMongoPayload::_id equal "faultyEnumSet")
-    testDb.getCollection<EnumMongoPayload>().internalCollection.insertOne(
-      Document(
-        setOf(
-          "_id" to "faultyEnumSet",
-          "enumSet" to setOf(
-            "VALUE1", "FAULTY", null, "VALUE3"
-          )
-        ).toMap()
+    runBlocking { // internalCollection is suspending
+      testDb.getCollection<EnumMongoPayload>().suspendingCollection.internalCollection.insertOne(
+        Document(
+          setOf(
+            "_id" to "faultyEnumSet",
+            "enumSet" to setOf(
+              "VALUE1", "FAULTY", null, "VALUE3"
+            )
+          ).toMap()
+        )
       )
-    )
+    }
 
     val result = testDb.getCollection<EnumMongoPayload>().findOne(EnumMongoPayload::_id equal "faultyEnumSet")
 
@@ -126,12 +130,12 @@ class BlockingDatabaseTests {
   }
 
   @Test
-  @Suppress("UNCHECKED_CAST")
   fun customDateArrayTest() {
     val payload = CustomDateArrayCLass()
     val bson = JsonHandler.toBsonDocument(payload)
     val newPayload = JsonHandler.fromBson(bson, CustomDateArrayCLass::class)
 
+    @Suppress("UNCHECKED_CAST")
     (payload.array zip (bson["array"] as List<Date>)).forEach { (old, new) -> assert(old == new) }
     (payload.array zip newPayload.array).forEach { (old, new) -> assert(old == new) }
   }
@@ -467,8 +471,8 @@ class BlockingDatabaseTests {
   }
 
   @Test
-  fun suspendingFindTest() = runBlocking {
-    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { clear() }
+  fun findTest() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { clear() }
 
     val payloads = (1..50)
       .map {
@@ -479,7 +483,7 @@ class BlockingDatabaseTests {
       }
       .onEach { collection.insertOne(it, upsert = false) }
 
-    collection.find().collect { payload ->
+    collection.find().forEach { payload ->
       assert(payloads.any { it._id == payload._id })
     }
   }
@@ -530,7 +534,8 @@ class BlockingDatabaseTests {
 
   @Test
   fun dbStats() {
-    val stats = testDb.getDatabaseStats()
+    // getDatabaseStats are suspending
+    val stats = runBlocking { testDb.getDatabaseStats() }
     assert(stats.collections > 0)
   }
 
@@ -603,7 +608,8 @@ class BlockingDatabaseTests {
       .onEach { collection.insertOne(it, upsert = false) }
 
     val query = collection.find().sortByDescending(EnumMongoPayload::long)
-    val iter = query.mongoIterable.iterator()
+    val iter = query.flow.toBlockingIterator()
+    assertEquals(true, iter.hasNext())
     assertEquals(22, iter.next().getLong("long"))
 
     assertEquals(insertedPayloads.minOf { it.long }, collection.find().sortBy(EnumMongoPayload::long).toList().first().long)
@@ -613,6 +619,7 @@ class BlockingDatabaseTests {
     assertEquals(insertedPayloads.minOf { it.long }, collection.find().sortByDescending(EnumMongoPayload::long).toList().last().long)
   }
 
+  @OptIn(ExcludeFieldsQueryAntiPattern::class)
   @Test
   fun fieldSelection() {
     val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
@@ -623,9 +630,7 @@ class BlockingDatabaseTests {
       .map { EnumMongoPayload().apply { _id = randomId(); long = longInsertedValue; stringList = stringListInsertedValue } }
       .onEach { collection.insertOne(it, upsert = false) }
 
-    @Suppress("DEPRECATION")
     assertEquals(EnumMongoPayload().long, collection.find().excludeFields(EnumMongoPayload::long).toList().first().long)
-    @Suppress("DEPRECATION")
     assertEquals(stringListInsertedValue, collection.find().excludeFields(EnumMongoPayload::long).toList().first().stringList)
 
     assertEquals(longInsertedValue, collection.find().selectedFields(EnumMongoPayload::long).toList().first().long)
@@ -682,10 +687,40 @@ class BlockingDatabaseTests {
     }
   }
 
+
+  @Test
+  fun bulkWrite() {
+    testDb.getCollection<EnumMongoPayload>().bulkWrite {
+      deleteMany()
+      insertOne(EnumMongoPayload().apply { _id = "bulkWrite-deleteOne" }, upsert = false)
+      insertOne(EnumMongoPayload().apply { _id = "bulkWrite-updateOne" }, upsert = false)
+      insertOne(EnumMongoPayload().apply { _id = "bulkWrite-toBeDeletedWithDeleteMany" }, upsert = false)
+      deleteOne(EnumMongoPayload::_id equal "bulkWrite-deleteOne")
+      updateOne(EnumMongoPayload::_id equal "bulkWrite-updateOne") {
+        EnumMongoPayload::stringList push "1"
+      }
+      deleteMany(EnumMongoPayload::stringList equal listOf())
+      updateMany(EnumMongoPayload::_id equal "bulkWrite-updateOne") {
+        EnumMongoPayload::stringList push "2"
+      }
+
+      updateOneOrInsert(EnumMongoPayload::_id equal "bulkWrite-updateOneOrInsert") {
+        EnumMongoPayload::stringList push "a"
+      }
+      updateOneOrInsert(EnumMongoPayload::_id equal "bulkWrite-updateOneOrInsert") {
+        EnumMongoPayload::stringList push "b"
+      }
+    }
+
+    val elements = testDb.getCollection<EnumMongoPayload>().find().toList()
+    assertEquals(setOf("bulkWrite-updateOne", "bulkWrite-updateOneOrInsert"), elements.map { it._id }.toSet())
+    assertEquals(listOf("1", "2"), elements.single { it._id == "bulkWrite-updateOne" }.stringList)
+    assertEquals(listOf("a", "b"), elements.single { it._id == "bulkWrite-updateOneOrInsert" }.stringList)
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 
-    @Suppress("unused")
     @BeforeAll
     @JvmStatic
     fun setup() {
@@ -701,7 +736,7 @@ class BlockingDatabaseTests {
         }
         collection<SimpleMongoPayload>("simpleMongoColl")
         collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
-      }
+      }.connectBlocking()
     }
   }
 }
