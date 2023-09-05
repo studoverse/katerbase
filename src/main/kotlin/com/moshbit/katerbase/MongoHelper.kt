@@ -213,6 +213,14 @@ class PushPair<Value>
   constructor(key: MongoEntryField<List<Value>>, value: Document) : this(key.toMongoField(), value)
 }
 
+class PushMultiplePair<Value>
+@Deprecated("Use only for hacks") constructor(key: MongoField, values: List<*>, slice: Int? = null) :
+  MongoPair(key, Document("\$each", values.toBSONDocument()).apply { slice?.let { append("\$slice", it) } }) {
+
+  @Suppress("DEPRECATION")
+  constructor(key: MongoEntryField<List<Value>>, values: List<Value?>, slice: Int? = null) : this(key.toMongoField(), values, slice)
+}
+
 // See: https://docs.mongodb.com/manual/reference/operator/update/unset/
 @Deprecated("Use only for hacks")
 class UnsetPair(key: MongoField) : MongoPair(key, value = "") {

@@ -485,7 +485,7 @@ MongoDB [here](https://www.mongodb.com/docs/manual/reference/method/Session.star
 * multiplyBy
 * min
 * max
-* push
+* push (with optional slice parameter)
 * pull
 * pullWhere
 * child

@@ -841,6 +841,15 @@ open class MongoDatabase(
       }
 
       /**
+       * Use this if you want to push multiple new items to a list and/or cap the list size to [slice]
+       * More info: https://docs.mongodb.com/manual/reference/operator/update/push/ and
+       * https://www.mongodb.com/docs/manual/reference/operator/update/slice/
+       */
+      fun <Value> MongoEntryField<List<Value>>.push(vararg values: Value, slice: Int? = null) {
+        updateMutator(operator = "push", mutator = PushMultiplePair(this, values.toList(), slice))
+      }
+
+      /**
        * Use this if you want to push a new item to a set
        * This only works with primitives!!!!
        * More info: https://docs.mongodb.com/manual/reference/operator/update/addToSet/
@@ -849,6 +858,17 @@ open class MongoDatabase(
       infix fun <Value> MongoEntryField<Set<Value>>.push(value: Value) {
         @Suppress("DEPRECATION") // Use the hack version because List != Set
         updateMutator(operator = "addToSet", mutator = PushPair<Value>(this.toMongoField(), value))
+      }
+
+      /**
+       * Use this if you want to push multiple new items to a set
+       * This only works with primitives!!!!
+       * More info: https://docs.mongodb.com/manual/reference/operator/update/addToSet/
+       */
+      @JvmName("pushToSet")
+      fun <Value> MongoEntryField<Set<Value>>.push(vararg values: Value) {
+        @Suppress("DEPRECATION") // Use the hack version because List != Set
+        updateMutator(operator = "addToSet", mutator = PushMultiplePair<Value>(this.toMongoField(), values.toList(), slice = null))
       }
 
       /**
