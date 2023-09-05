@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.core.Version
 import com.fasterxml.jackson.core.json.JsonReadFeature
+import com.fasterxml.jackson.core.json.WriterBasedJsonGenerator
 import com.fasterxml.jackson.databind.*
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.databind.module.SimpleModule
@@ -174,8 +175,10 @@ object JsonHandler {
       classDescriptor.enumIterableTypes.forEach { (property, enumClass) ->
         val valueOfMethod =
           valueMethodCache.getOrPut(enumClass) { enumClass.java.declaredMethods.find { it.name == "valueOf" }!! } // Cache this because declaredMethods is expensive
-        val stringValues = tree[property.name]?.map { it.textValue()!! }
-          ?: return@forEach // Not unchecked because MongoDB enums can only have string values
+        val stringValues = tree[property.name]?.map { node ->
+          node.textValue() // Throw if we want to serialize e.g. an array to an enum.
+            ?: throw NullPointerException("${property.name} has no textValue() because it is type ${node.nodeType}. Document: $tree")
+        } ?: return@forEach // Not unchecked because MongoDB enums can only have string values
         val validValues = stringValues.mapNotNull {
           // Try to deserialize enum values from strings, if none found drop it
           try {
@@ -194,7 +197,13 @@ object JsonHandler {
   }
 
   private class MongoDateSerializer : JsonSerializer<Date>() {
-    override fun serialize(value: Date, gen: JsonGenerator, serializers: SerializerProvider) = gen.writeEmbeddedObject(value)
+    override fun serialize(value: Date, gen: JsonGenerator, serializers: SerializerProvider) {
+      if (gen is WriterBasedJsonGenerator) {
+        gen.writeString(value.toInstant().toString()) // E.g. used when calling JsonHandler.toString(bson)
+      } else {
+        gen.writeEmbeddedObject(value) // Used when passing the katerbase object to mongodb
+      }
+    }
     override fun handledType(): Class<Date> = Date::class.java
   }
 

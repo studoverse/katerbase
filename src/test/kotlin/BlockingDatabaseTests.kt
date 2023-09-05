@@ -682,6 +682,16 @@ class BlockingDatabaseTests {
     }
   }
 
+  @Test
+  fun dateSerialization() {
+    val payload = EnumMongoPayload().apply { _id = "dateSerialization"; date = Date() }
+    val bson = JsonHandler.toBsonDocument(payload)
+    val bsonToJson = JsonHandler.toJsonString(bson) // E.g. used when MongoDatabase.logAllQueries = true
+
+    assertEquals(true, bsonToJson.contains("date"))
+    assertEquals(bsonToJson, JsonHandler.toJsonString(payload))
+  }
+
   companion object {
     lateinit var testDb: MongoDatabase
 
