@@ -650,6 +650,60 @@ class BlockingDatabaseTests {
   }
 
   @Test
+  fun testPushMultiple() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testPushMultiple"
+    assertEquals(0, collection.find().count())
+
+    collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push("a", "b", "c")
+      EnumMongoPayload::enumSet.push(*EnumMongoPayload.Enum1.entries.toTypedArray())
+    }
+
+    assertEquals(listOf("a", "b", "c"), collection.find().first().stringList)
+    assertEquals(EnumMongoPayload.Enum1.entries.toSet(), collection.find().first().enumSet.toSet())
+  }
+
+  @Test
+  fun testPushAndSlice() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testPushAndSlice"
+    assertEquals(0, collection.find().count())
+
+    repeat(10) { count ->
+      collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+        EnumMongoPayload::stringList.push(count.toString(), slice = -5) // TODO rename sliceFirst/Last
+        // Can't slice a set, so test only stringList
+      }
+    }
+    assertEquals(listOf("5", "6", "7", "8", "9"), collection.find().first().stringList)
+  }
+
+  @Test
+  fun testEmptyPushAndSlice() {
+    val collection = testDb.getCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testEmptyPushAndSlice"
+    assertEquals(0, collection.find().count())
+
+    collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push("a", "b", "c", "d", "e", "f", "g")
+    }
+    assertEquals(listOf("a", "b", "c", "d", "e", "f", "g"), collection.find().first().stringList)
+
+    // Cap to 5 elements (remove the last elements)
+    collection.updateOne(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push(slice = 5)
+    }
+    assertEquals(listOf("a", "b", "c", "d", "e"), collection.find().first().stringList)
+
+    // Cap to 3 elements (remove the first elements)
+    collection.updateOne(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push(slice = -3)
+    }
+    assertEquals(listOf("c", "d", "e"), collection.find().first().stringList)
+  }
+
+  @Test
   fun findEquality() {
     with(testDb.getCollection<EnumMongoPayload>()) {
 

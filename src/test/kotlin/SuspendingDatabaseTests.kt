@@ -11,7 +11,7 @@ import util.addYears
 import util.forEachAsyncCoroutine
 import java.util.*
 
-// Keep BlockingDatabaseTests and SuspendingDatabaseTests in sync, and only change getSuspendingCollection with getSuspendingCollection
+// Keep BlockingDatabaseTests and SuspendingDatabaseTests in sync, and only change getCollection with getSuspendingCollection
 class SuspendingDatabaseTests {
   @Test
   fun enumHandling1(): Unit = runBlocking {
@@ -657,6 +657,60 @@ class SuspendingDatabaseTests {
   }
 
   @Test
+  fun testPushMultiple() = runBlocking {
+    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testPushMultiple"
+    assertEquals(0, collection.find().count())
+
+    collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push("a", "b", "c")
+      EnumMongoPayload::enumSet.push(*EnumMongoPayload.Enum1.entries.toTypedArray())
+    }
+
+    assertEquals(listOf("a", "b", "c"), collection.find().first().stringList)
+    assertEquals(EnumMongoPayload.Enum1.entries.toSet(), collection.find().first().enumSet.toSet())
+  }
+
+  @Test
+  fun testPushAndSlice() = runBlocking {
+    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testPushAndSlice"
+    assertEquals(0, collection.find().count())
+
+    repeat(10) { count ->
+      collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+        EnumMongoPayload::stringList.push(count.toString(), slice = -5)
+        // Can't slice a set, so test only stringList
+      }
+    }
+    assertEquals(listOf("5", "6", "7", "8", "9"), collection.find().first().stringList)
+  }
+
+  @Test
+  fun testEmptyPushAndSlice() = runBlocking {
+    val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
+    val id = "testEmptyPushAndSlice"
+    assertEquals(0, collection.find().count())
+
+    collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push("a", "b", "c", "d", "e", "f", "g")
+    }
+    assertEquals(listOf("a", "b", "c", "d", "e", "f", "g"), collection.find().first().stringList)
+
+    // Cap to 5 elements (remove the last elements)
+    collection.updateOne(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push(slice = 5)
+    }
+    assertEquals(listOf("a", "b", "c", "d", "e"), collection.find().first().stringList)
+
+    // Cap to 3 elements (remove the first elements)
+    collection.updateOne(EnumMongoPayload::_id equal id) {
+      EnumMongoPayload::stringList.push(slice = -3)
+    }
+    assertEquals(listOf("c", "d", "e"), collection.find().first().stringList)
+  }
+
+  @Test
   fun nameEscapeTest(): Unit = runBlocking {
     val collection = testDb.getSuspendingCollection<EnumMongoPayload>().apply { drop() }
     val id = "nameEscapeTest"
@@ -692,17 +746,17 @@ class SuspendingDatabaseTests {
     }
     testDb.getSuspendingCollection<OpenClassMongoPayload>().insertOne(payload, upsert = true)
 
-    val simpleMongoPayload = testDb.getCollection<OpenClassMongoPayload>().findOne(OpenClassMongoPayload::_id equal id)
+    val simpleMongoPayload = testDb.getSuspendingCollection<OpenClassMongoPayload>().findOne(OpenClassMongoPayload::_id equal id)
     assertEquals(sealedClass1Test.string, (simpleMongoPayload!!.sealedClass1 as OpenClassMongoPayload.SealedClass.Class1).string)
 
     val sealedClass2testUpdated = OpenClassMongoPayload.SealedClass.Class2(int = 100)
-    testDb.getCollection<OpenClassMongoPayload>().updateOne(OpenClassMongoPayload::_id equal id) {
+    testDb.getSuspendingCollection<OpenClassMongoPayload>().updateOne(OpenClassMongoPayload::_id equal id) {
       OpenClassMongoPayload::sealedClass2 setTo sealedClass2testUpdated
     }
-    val updatedMongoPayload = testDb.getCollection<OpenClassMongoPayload>().findOne(OpenClassMongoPayload::_id equal id)
+    val updatedMongoPayload = testDb.getSuspendingCollection<OpenClassMongoPayload>().findOne(OpenClassMongoPayload::_id equal id)
     assertEquals(sealedClass2testUpdated.int, (updatedMongoPayload!!.sealedClass2 as OpenClassMongoPayload.SealedClass.Class2).int)
 
-    testDb.getCollection<OpenClassMongoPayload>().deleteOne(OpenClassMongoPayload::_id equal id)
+    testDb.getSuspendingCollection<OpenClassMongoPayload>().deleteOne(OpenClassMongoPayload::_id equal id)
   }
 
   @Test
