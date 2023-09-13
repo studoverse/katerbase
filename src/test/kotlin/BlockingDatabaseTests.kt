@@ -539,12 +539,12 @@ class BlockingDatabaseTests {
     with(MongoDatabaseDefinition.Collection(EnumMongoPayload::class, "enumColl", collectionSizeCap = null)) {
       index(
         EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
-          EnumMongoPayload::double greater 0
+          EnumMongoPayload::double greater 0.0
         )
       )
       index(
         EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
-          EnumMongoPayload::double equal 0
+          EnumMongoPayload::double equal 0.0
         )
       )
       index(
@@ -556,7 +556,7 @@ class BlockingDatabaseTests {
       assertThrows(IllegalArgumentException::class.java) {
         index(
           EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
-            EnumMongoPayload::double notEqual 0
+            EnumMongoPayload::double notEqual 0.0
           )
         )
       }
@@ -672,7 +672,7 @@ class BlockingDatabaseTests {
 
     repeat(10) { count ->
       collection.updateOneOrInsert(EnumMongoPayload::_id equal id) {
-        EnumMongoPayload::stringList.push(count.toString(), slice = -5) // TODO rename sliceFirst/Last
+        EnumMongoPayload::stringList.push(count.toString(), slice = -5)
         // Can't slice a set, so test only stringList
       }
     }

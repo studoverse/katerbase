@@ -546,12 +546,12 @@ class SuspendingDatabaseTests {
     with(MongoDatabaseDefinition.Collection(EnumMongoPayload::class, "enumColl", collectionSizeCap = null)) {
       index(
         EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
-          EnumMongoPayload::double greater 0
+          EnumMongoPayload::double greater 0.0
         )
       )
       index(
         EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
-          EnumMongoPayload::double equal 0
+          EnumMongoPayload::double equal 0.0
         )
       )
       index(
@@ -563,7 +563,7 @@ class SuspendingDatabaseTests {
       assertThrows(IllegalArgumentException::class.java) {
         index(
           EnumMongoPayload::double.ascending(), partialIndex = arrayOf(
-            EnumMongoPayload::double notEqual 0
+            EnumMongoPayload::double notEqual 0.0
           )
         )
       }
