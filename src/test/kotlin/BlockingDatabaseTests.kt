@@ -754,11 +754,21 @@ class BlockingDatabaseTests {
       nullableChild = EnumMongoPayload.Child().apply { string = "nullableChild" }
       listOfChilds = listOf(EnumMongoPayload.Child().apply { string = "listOfChilds" })
       listOfNullableChilds = listOf(EnumMongoPayload.Child().apply { string = "listOfNullableChilds" })
+      stringList = listOf("a", "b", "c")
     }
     with(testDb.getCollection<EnumMongoPayload>()) {
       insertOne(EnumMongoPayload().apply { _id = "childHandling-anotherId1" }, upsert = true)
       insertOne(payload, upsert = true)
       insertOne(EnumMongoPayload().apply { _id = "childHandling-anotherId2" }, upsert = true)
+
+      assertEquals(payload, findOne(EnumMongoPayload::stringList.equal(listOf("a", "b", "c"))))
+      assertEquals(payload, findOne(EnumMongoPayload::stringList.equal(123)))
+      assertEquals(null, findOne(EnumMongoPayload::stringList equal 123)) // This should not compile
+      assertEquals(null, findOne(EnumMongoPayload::stringList equal listOf("b", "b", "a")))
+
+      assertEquals(payload, findOne(EnumMongoPayload::nullableChild notEqual null))
+      assertEquals(null, findOne(EnumMongoPayload::_id equal payload._id, EnumMongoPayload::nullableChild equal null))
+
       assertEquals(payload, findOne(EnumMongoPayload::child.child(EnumMongoPayload.Child::string) equal "child"))
       assertEquals(payload, findOne(EnumMongoPayload::nullableChild.child(EnumMongoPayload.Child::string) equal "nullableChild"))
       assertEquals(payload, findOne(EnumMongoPayload::listOfChilds.child(EnumMongoPayload.Child::string) equal "listOfChilds"))
