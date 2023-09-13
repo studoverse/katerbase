@@ -746,10 +746,20 @@ open class MongoDatabase(
         return this.toMongoField().extend(property.name).toProperty()
       }
 
+      @JvmName("childOnNullableProperty")
+      fun <Class, Value> NullableMongoEntryField<out Any>.child(property: KMutableProperty1<Class, Value>): MongoEntryField<Value> {
+        return this.toMongoField().extend(property.name).toProperty()
+      }
+
       /**
        * Use this if you want to modify a map's field
        */
       fun <Value> MongoEntryField<Map<String, Value>>.child(key: String): MongoEntryField<Value> {
+        return this.toMongoField().extend(key).toProperty()
+      }
+
+      @JvmName("childOnNullableKey")
+      fun <Value> NullableMongoEntryField<Map<String, Value>>.child(key: String): MongoEntryField<Value> {
         return this.toMongoField().extend(key).toProperty()
       }
 

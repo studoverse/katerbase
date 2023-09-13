@@ -205,7 +205,7 @@ class BlockingDatabaseTests {
     val payload = EnumMongoPayload()
     val bson = payload.toBSONDocument()
     assert(bson["computedProp"] == null)
-    assertEquals(15, bson.size)
+    assertEquals(19, bson.size)
   }
   /*
     @Test
@@ -744,6 +744,29 @@ class BlockingDatabaseTests {
 
     assertEquals(true, bsonToJson.contains("date"))
     assertEquals(bsonToJson, JsonHandler.toJsonString(payload))
+  }
+
+  @Test
+  fun childHandling() {
+    val payload = EnumMongoPayload().apply {
+      _id = "childHandling"
+      child = EnumMongoPayload.Child().apply { string = "child" }
+      nullableChild = EnumMongoPayload.Child().apply { string = "nullableChild" }
+      listOfChilds = listOf(EnumMongoPayload.Child().apply { string = "listOfChilds" })
+      listOfNullableChilds = listOf(EnumMongoPayload.Child().apply { string = "listOfNullableChilds" })
+    }
+    with(testDb.getCollection<EnumMongoPayload>()) {
+      insertOne(EnumMongoPayload().apply { _id = "childHandling-anotherId1" }, upsert = true)
+      insertOne(payload, upsert = true)
+      insertOne(EnumMongoPayload().apply { _id = "childHandling-anotherId2" }, upsert = true)
+      assertEquals(payload, findOne(EnumMongoPayload::child.child(EnumMongoPayload.Child::string) equal "child"))
+      assertEquals(payload, findOne(EnumMongoPayload::nullableChild.child(EnumMongoPayload.Child::string) equal "nullableChild"))
+      assertEquals(payload, findOne(EnumMongoPayload::listOfChilds.child(EnumMongoPayload.Child::string) equal "listOfChilds"))
+      assertEquals(
+        payload,
+        findOne(EnumMongoPayload::listOfNullableChilds.child(EnumMongoPayload.Child::string) equal "listOfNullableChilds")
+      )
+    }
   }
 
   companion object {

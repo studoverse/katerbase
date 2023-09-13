@@ -90,6 +90,7 @@ fun Array<out MongoPair>.toFilterDocument(): Document {
 class SubDocumentListFilter(vararg val filter: FilterPair)
 
 typealias MongoEntryField<T> = KProperty1<out MongoEntry, T>
+typealias NullableMongoEntryField<T> = KProperty1<out MongoEntry, T?>
 
 fun <Value> MongoEntryField<Value>.toMongoField() = MongoField(name)
 
@@ -97,6 +98,11 @@ fun <Value> MongoEntryField<Value>.toMongoField() = MongoField(name)
  * Use this if you want to access a subdocument's field
  */
 fun <Value> MongoEntryField<out Any>.child(property: MongoEntryField<Value?>): MongoEntryField<Value> where Value : Comparable<Value> {
+  return this.toMongoField().extend(property.name).toProperty()
+}
+
+@JvmName("childOnNullable")
+fun <Value> NullableMongoEntryField<out Any>.child(property: MongoEntryField<Value?>): MongoEntryField<Value> where Value : Comparable<Value> {
   return this.toMongoField().extend(property.name).toProperty()
 }
 
