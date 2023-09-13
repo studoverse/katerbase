@@ -8,6 +8,10 @@ class EnumMongoPayload(val value1: Enum1 = Enum1.VALUE1) : MongoMainEntry() {
     VALUE1, VALUE2, VALUE3
   }
 
+  class Child : MongoSubEntry() {
+    var string = ""
+  }
+
   var enumList: List<Enum1> = emptyList()
   var enumSet: Set<Enum1> = emptySet()
   var enumMap1: Map<Enum1, Int> = emptyMap()
@@ -22,6 +26,10 @@ class EnumMongoPayload(val value1: Enum1 = Enum1.VALUE1) : MongoMainEntry() {
   var byteArray: ByteArray = "yolo".toByteArray()
   var dateArray = emptyList<Date>()
   var nullableString: String? = null
+  var child: Child = Child()
+  var nullableChild: Child? = null
+  var listOfChilds: List<Child> = emptyList()
+  var listOfNullableChilds: List<Child?> = emptyList()
 }
 
 class SimpleMongoPayload : MongoMainEntry() {
