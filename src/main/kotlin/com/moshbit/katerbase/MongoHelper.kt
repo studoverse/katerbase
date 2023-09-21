@@ -97,19 +97,19 @@ fun <Value> MongoEntryField<Value>.toMongoField() = MongoField(name)
 /**
  * Use this if you want to access a subdocument's field
  */
-fun <Value> MongoEntryField<out Any>.child(property: MongoEntryField<Value?>): MongoEntryField<Value> where Value : Comparable<Value> {
+fun <Value> MongoEntryField<out Any>.child(property: MongoEntryField<Value>): MongoEntryField<Value> {
   return this.toMongoField().extend(property.name).toProperty()
 }
 
 @JvmName("childOnNullable")
-fun <Value> NullableMongoEntryField<out Any>.child(property: MongoEntryField<Value?>): MongoEntryField<Value> where Value : Comparable<Value> {
+fun <Value> NullableMongoEntryField<out Any>.child(property: MongoEntryField<Value>): MongoEntryField<Value> {
   return this.toMongoField().extend(property.name).toProperty()
 }
 
 /**
  * Use this if you want to access a map's value using the key.
  */
-fun <Value> MongoEntryField<Map<String, Value>>.child(key: String): MongoEntryField<Value?> where Value : Comparable<Value> {
+fun <Value> MongoEntryField<Map<String, Value>>.child(key: String): MongoEntryField<Value> {
   return this.toMongoField().extend(key).toProperty()
 }
 
@@ -231,9 +231,8 @@ class UnsetPair(key: MongoField) : MongoPair(key, value = "") {
 
 // FilterPair
 
-infix fun <Value> MongoEntryField<Value?>.equal(value: Value?) where Value : Comparable<Value> = FilterPair(this, value)
-infix fun <Value> MongoEntryField<Value?>.notEqual(value: Value?) where Value : Comparable<Value> =
-  FilterPair(this, Document("\$ne", value))
+infix fun <Value> MongoEntryField<Value>.equal(value: Value?) = FilterPair(this, value)
+infix fun <Value> MongoEntryField<Value>.notEqual(value: Value?) = FilterPair(this, Document("\$ne", value))
 
 // THIS CALL CAN NOT BE INDEXED!!!
 infix fun MongoEntryField<String>.contains(value: String) = contains(value, caseSensitive = true)
@@ -272,11 +271,11 @@ fun MongoEntryField<String>.endsWith(value: String, caseSensitive: Boolean = tru
 
 infix fun <Value> MongoEntryField<out Collection<Value>>.has(value: Value) = FilterPair(this, value)
 
-infix fun <Value> MongoEntryField<Value?>.inArray(array: Collection<Value>): FilterPair where Value : Comparable<Value> {
+infix fun <Value> MongoEntryField<Value>.inArray(array: Collection<Value>): FilterPair {
   return FilterPair(this, Document("\$in", array))
 }
 
-infix fun <Value> MongoEntryField<Value?>.notInArray(array: Collection<Value>): FilterPair where Value : Comparable<Value> {
+infix fun <Value> MongoEntryField<Value>.notInArray(array: Collection<Value>): FilterPair {
   return FilterPair(this, Document("\$nin", array))
 }
 
@@ -286,32 +285,24 @@ infix fun <Value> MongoEntryField<out Collection<Value>>.hasAnyInArray(array: Co
 infix fun <Value> MongoEntryField<out Collection<Value>>.hasNoneInArray(array: Collection<Value>) =
   FilterPair(this, Document("\$nin", array))
 
-infix fun <Value> MongoEntryField<Value?>.lower(value: Value) where Value : Comparable<Value> = FilterPair(this, Document("\$lt", value))
-infix fun <Value> MongoEntryField<Value?>.lowerEquals(value: Value) where Value : Comparable<Value> =
-  FilterPair(this, Document("\$lte", value))
+infix fun <Value> MongoEntryField<Value>.lower(value: Value) = FilterPair(this, Document("\$lt", value))
+infix fun <Value> MongoEntryField<Value>.lowerEquals(value: Value) = FilterPair(this, Document("\$lte", value))
 
-infix fun <Value> MongoEntryField<Value?>.greater(value: Value) where Value : Comparable<Value> = FilterPair(this, Document("\$gt", value))
-infix fun <Value> MongoEntryField<Value?>.greaterEquals(value: Value) where Value : Comparable<Value> =
-  FilterPair(this, Document("\$gte", value))
+infix fun <Value> MongoEntryField<Value>.greater(value: Value) = FilterPair(this, Document("\$gt", value))
+infix fun <Value> MongoEntryField<Value>.greaterEquals(value: Value) = FilterPair(this, Document("\$gte", value))
 
-fun <Value> MongoEntryField<Value?>.inRange(
-  start: Value,
-  end: Value,
-  includeStart: Boolean = true,
-  includeEnd: Boolean = false
-) where Value : Comparable<Value> =
+fun <Value> MongoEntryField<Value>.inRange(start: Value, end: Value, includeStart: Boolean = true, includeEnd: Boolean = false) =
   FilterPair(this, Document().apply {
     if (includeStart) putAll(Document("\$gte", start)) else putAll(Document("\$gt", start))
     if (includeEnd) putAll(Document("\$lte", end)) else putAll(Document("\$lt", end))
   })
 
 // Keep in mind that this query can't be indexed (unless using probably a space index)
-infix fun <Value> MongoEntryField<Value?>.exists(value: Boolean) where Value : Comparable<Value> =
-  FilterPair(this, Document("\$exists", value))
+infix fun <Value> MongoEntryField<Value>.exists(value: Boolean) = FilterPair(this, Document("\$exists", value))
 
 // MutatorPair
 
-infix fun <Value> MongoEntryField<Value?>.valueDocument(value: Document) where Value : Comparable<Value> = MutatorPair(this, value)
+infix fun <Value> MongoEntryField<Value>.valueDocument(value: Document) = MutatorPair(this, value)
 
 // PushPair
 infix fun <Value> MongoEntryField<List<Value>>.valueDocument(value: Document) = PushPair(this, value)
