@@ -761,9 +761,7 @@ class BlockingDatabaseTests {
       insertOne(payload, upsert = true)
       insertOne(EnumMongoPayload().apply { _id = "childHandling-anotherId2" }, upsert = true)
 
-      assertEquals(payload, findOne(EnumMongoPayload::stringList.equal(listOf("a", "b", "c"))))
-      assertEquals(payload, findOne(EnumMongoPayload::stringList.equal(123)))
-      assertEquals(null, findOne(EnumMongoPayload::stringList equal 123)) // This should not compile
+      assertEquals(payload, findOne(EnumMongoPayload::stringList equal listOf("a", "b", "c")))
       assertEquals(null, findOne(EnumMongoPayload::stringList equal listOf("b", "b", "a")))
 
       assertEquals(payload, findOne(EnumMongoPayload::nullableChild notEqual null))
@@ -776,6 +774,11 @@ class BlockingDatabaseTests {
         payload,
         findOne(EnumMongoPayload::listOfNullableChilds.child(EnumMongoPayload.Child::string) equal "listOfNullableChilds")
       )
+
+      // In an ideal world, the following statements would not compile, because it uses the wrong type (Int instead of String).
+      // However, currently we do not support type checking here.
+      assertEquals(null, findOne(EnumMongoPayload::stringList equal 123))
+      assertEquals(null, findOne(EnumMongoPayload::_id equal 123))
     }
   }
 
