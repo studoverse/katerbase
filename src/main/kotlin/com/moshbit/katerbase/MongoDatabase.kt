@@ -140,14 +140,23 @@ open class MongoDatabase(
     )
 
     changeStreamClient = if (supportChangeStreams) {
-      createMongoClientFromUri(connectionString, allowReadFromSecondaries = false, useMajorityWrite = false, clientSettings = {
-        readPreference(ReadPreference.primaryPreferred())
+      val readChangeStreamFromSecondary = System.getenv("KATERBASE_READ_CHANGESTREAM_FROM_SECONDARY") == "true"
+      createMongoClientFromUri(connectionString,
+        allowReadFromSecondaries = readChangeStreamFromSecondary,
+        useMajorityWrite = readChangeStreamFromSecondary,
+        clientSettings = {
+          if (readChangeStreamFromSecondary) {
+            readPreference(ReadPreference.secondaryPreferred())
+          } else {
+            readPreference(ReadPreference.primaryPreferred())
+          }
 
-        // ChangeStreams work until MongoDB 4.2 only with ReadConcern.MAJORITY, see https://docs.mongodb.com/manual/changeStreams/
-        readConcern(ReadConcern.MAJORITY)
+          // ChangeStreams work until MongoDB 4.2 only with ReadConcern.MAJORITY, see https://docs.mongodb.com/manual/changeStreams/
+          readConcern(ReadConcern.MAJORITY)
 
-        clientSettings?.invoke(this)
-      })
+          clientSettings?.invoke(this)
+        }
+      )
     } else {
       null
     }
