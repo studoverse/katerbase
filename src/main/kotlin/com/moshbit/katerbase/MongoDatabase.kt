@@ -165,8 +165,9 @@ open class MongoDatabase(
     }
 
     secondaryClient = when {
+      allowReadFromSecondaries -> client // Reuse default client because it's only reading from secondaries
       supportChangeStreams && readChangeStreamFromSecondary -> changeStreamClient // Reuse changeStream client because it's only reading from secondaries
-      supportChangeStreams || allowReadFromSecondaries -> {
+      else -> {
         createMongoClientFromUri(connectionString,
           allowReadFromSecondaries = true,
           useMajorityWrite = true,
@@ -180,8 +181,6 @@ open class MongoDatabase(
           }
         )
       }
-
-      else -> null
     }
 
     internalDatabase = client.getDatabase(connectionString.database!!)
@@ -214,8 +213,9 @@ open class MongoDatabase(
     } else emptyMap()
 
     secondaryCollections = when {
+      allowReadFromSecondaries -> mongoCollections // Reuse default collections because it's only reading from secondaries
       supportChangeStreams && readChangeStreamFromSecondary -> changeStreamCollections // Reuse changeStream collections because it's only reading from secondaries
-      supportChangeStreams || allowReadFromSecondaries -> {
+      else -> {
         val secondaryClientDatabase = secondaryClient!!.getDatabase(connectionString.database!!)
         databaseDefinition.collections.associateBy(
           keySelector = { it.modelClass },
@@ -228,8 +228,6 @@ open class MongoDatabase(
           }
         )
       }
-
-      else -> emptyMap()
     }
 
     if (autoCreateCollections) {
