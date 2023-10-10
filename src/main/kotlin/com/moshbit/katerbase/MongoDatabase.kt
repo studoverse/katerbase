@@ -1151,6 +1151,14 @@ open class MongoDatabase(
       return MongoClientSettings.builder()
         .applyConnectionString(connectionString)
         .apply {
+          System.getenv("APP")?.takeIf { it.isNotBlank() }?.let { appName ->
+            applicationName(appName)
+            System.getenv("CONTAINER")?.takeIf { it.isNotBlank() }?.let { containerName ->
+              applicationName("$appName - $containerName")
+            }
+          }
+        }
+        .apply {
           when {
             allowReadFromSecondaries -> {
               // Set maxStalenessSeconds, see https://docs.mongodb.com/manual/core/read-preference/#maxstalenessseconds
