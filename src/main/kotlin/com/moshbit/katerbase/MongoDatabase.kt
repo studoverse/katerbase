@@ -55,7 +55,9 @@ open class MongoDatabase(
   protected val internalDatabase: com.mongodb.client.MongoDatabase
   protected val mongoCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
   protected val changeStreamClient: MongoClient?
+  protected val secondaryClient: MongoClient?
   protected val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
+  protected val secondaryCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
 
   open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
@@ -139,8 +141,9 @@ open class MongoDatabase(
       clientSettings = clientSettings
     )
 
+    val readChangeStreamFromSecondary = System.getenv("KATERBASE_READ_CHANGESTREAM_FROM_SECONDARY") == "true"
+
     changeStreamClient = if (supportChangeStreams) {
-      val readChangeStreamFromSecondary = System.getenv("KATERBASE_READ_CHANGESTREAM_FROM_SECONDARY") == "true"
       createMongoClientFromUri(connectionString,
         allowReadFromSecondaries = readChangeStreamFromSecondary,
         useMajorityWrite = readChangeStreamFromSecondary,
@@ -159,6 +162,25 @@ open class MongoDatabase(
       )
     } else {
       null
+    }
+
+    secondaryClient = when {
+      allowReadFromSecondaries -> client // Reuse default client because it's only reading from secondaries
+      supportChangeStreams && readChangeStreamFromSecondary -> changeStreamClient // Reuse changeStream client because it's only reading from secondaries
+      else -> {
+        createMongoClientFromUri(connectionString,
+          allowReadFromSecondaries = true,
+          useMajorityWrite = true,
+          clientSettings = {
+            readPreference(ReadPreference.secondaryPreferred())
+
+            // ChangeStreams work until MongoDB 4.2 only with ReadConcern.MAJORITY, see https://docs.mongodb.com/manual/changeStreams/
+            readConcern(ReadConcern.MAJORITY)
+
+            clientSettings?.invoke(this)
+          }
+        )
+      }
     }
 
     internalDatabase = client.getDatabase(connectionString.database!!)
@@ -189,6 +211,24 @@ open class MongoDatabase(
         }
       )
     } else emptyMap()
+
+    secondaryCollections = when {
+      allowReadFromSecondaries -> mongoCollections // Reuse default collections because it's only reading from secondaries
+      supportChangeStreams && readChangeStreamFromSecondary -> changeStreamCollections // Reuse changeStream collections because it's only reading from secondaries
+      else -> {
+        val secondaryClientDatabase = secondaryClient!!.getDatabase(connectionString.database!!)
+        databaseDefinition.collections.associateBy(
+          keySelector = { it.modelClass },
+          valueTransform = {
+            MongoCollection(
+              internalCollection = secondaryClientDatabase.getCollection(it.collectionName),
+              entryClass = it.modelClass,
+              indexes = it.indexes,
+            )
+          }
+        )
+      }
+    }
 
     if (autoCreateCollections) {
       // Create collections which don't exist
@@ -284,6 +324,17 @@ open class MongoDatabase(
     val name: String get() = internalCollection.namespace.collectionName
 
     internal val indexes: List<MongoIndex> = indexes.map { MongoIndex(it) }
+
+    /**
+     * Gets a collection with same [Entry] that reads directly from a secondary node if DB configuration supports it.
+     * Use this function if you query data which doesn't always need to be up to date.
+     */
+    fun getSecondaryReadingCollectionIfSupported(): MongoCollection<Entry> {
+      val secondaryCollection = secondaryCollections[entryClass] ?: return this // DB is probably not in a replica set
+
+      @Suppress("UNCHECKED_CAST") // It's ok because Entry::class == entryClass
+      return secondaryCollection as MongoCollection<Entry>
+    }
 
     /**
      * This only works if MongoDB is a replica set
