@@ -1045,6 +1045,14 @@ open class MongoDatabase(
     val name: String get() = blockingCollection.name
     val entryClass: KClass<Entry> get() = blockingCollection.entryClass
 
+    /**
+     * Gets a collection with same [Entry] that reads directly from a secondary node if DB configuration supports it.
+     * Use this function if you query data which doesn't always need to be up to date.
+     */
+    fun getSecondaryReadingCollectionIfSupported(): SuspendingMongoCollection<Entry> {
+      return SuspendingMongoCollection(blockingCollection.getSecondaryReadingCollectionIfSupported())
+    }
+
     fun watch(pipeline: Document = defaultWatchPipeline, changeBufferCapacity: Int = 64): Channel<Result<PayloadChange<Entry>>> {
       val channel = Channel<Result<PayloadChange<Entry>>>(changeBufferCapacity)
 
