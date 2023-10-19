@@ -1214,6 +1214,9 @@ open class MongoDatabase(
             applicationName(appName)
             System.getenv("CONTAINER")?.takeIf { it.isNotBlank() }?.let { containerName ->
               applicationName("$appName - $containerName")
+              System.getenv("CONTAINER_VERSION")?.takeIf { it.isNotBlank() }?.let { version ->
+                applicationName("$appName - $containerName - $version")
+              }
             }
           }
         }
