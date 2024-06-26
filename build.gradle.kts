@@ -15,7 +15,7 @@ repositories {
 dependencies {
   implementation(kotlin("stdlib"))
 
-  implementation("org.mongodb:mongodb-driver-sync:4.9.0")
+  implementation("org.mongodb:mongodb-driver-sync:4.11.2")
 
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
 
