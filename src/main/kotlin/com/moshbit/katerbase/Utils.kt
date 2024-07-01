@@ -3,13 +3,13 @@ package com.moshbit.katerbase
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import org.apache.commons.codec.binary.Hex
-import org.slf4j.impl.StaticLoggerBinder
+import org.slf4j.LoggerFactory
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
 
 internal fun setLogLevel(name: String, level: Level) {
-  (StaticLoggerBinder.getSingleton().loggerFactory.getLogger(name) as Logger).level = level
+  (LoggerFactory.getLogger(name) as Logger).level = level
 }
 
 internal fun ByteArray.sha256(): String {
