@@ -30,7 +30,7 @@ dependencies {
 }
 
 tasks.withType<KotlinCompile> {
-  kotlinOptions.jvmTarget = "21"
+  kotlinOptions.jvmTarget = "11"
 }
 
 tasks.test {
