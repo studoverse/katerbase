@@ -30,7 +30,7 @@ dependencies {
 }
 
 tasks.withType<KotlinCompile> {
-  kotlinOptions.jvmTarget = "11"
+  kotlinOptions.jvmTarget = "21"
 }
 
 tasks.test {
@@ -42,7 +42,7 @@ tasks.test {
 
 kotlin {
   jvmToolchain {
-    languageVersion.set(JavaLanguageVersion.of("17")) // Auto-download JDK for developers
+    languageVersion.set(JavaLanguageVersion.of("21")) // Auto-download JDK for developers
   }
 }
 
