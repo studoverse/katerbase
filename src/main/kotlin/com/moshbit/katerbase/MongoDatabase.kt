@@ -43,6 +43,7 @@ import kotlin.reflect.KMutableProperty1
 open class MongoDatabase(
   uri: String,
   allowReadFromSecondaries: Boolean = false,
+  allowStaleData: Boolean = false,
   useMajorityWrite: Boolean = allowReadFromSecondaries,
   private val supportChangeStreams: Boolean = false,
   autoCreateCollections: Boolean = true,
@@ -138,7 +139,7 @@ open class MongoDatabase(
 
     client = createMongoClientFromUri(
       connectionString, allowReadFromSecondaries = allowReadFromSecondaries, useMajorityWrite = useMajorityWrite,
-      clientSettings = clientSettings
+      clientSettings = clientSettings, allowStaleData = allowStaleData
     )
 
     val readChangeStreamFromSecondary = System.getenv("KATERBASE_READ_CHANGESTREAM_FROM_SECONDARY") == "true"
@@ -146,6 +147,7 @@ open class MongoDatabase(
     changeStreamClient = if (supportChangeStreams) {
       createMongoClientFromUri(connectionString,
         allowReadFromSecondaries = readChangeStreamFromSecondary,
+        allowStaleData = allowStaleData,
         useMajorityWrite = readChangeStreamFromSecondary,
         clientSettings = {
           if (readChangeStreamFromSecondary) {
@@ -170,6 +172,7 @@ open class MongoDatabase(
       else -> {
         createMongoClientFromUri(connectionString,
           allowReadFromSecondaries = true,
+          allowStaleData = allowStaleData,
           useMajorityWrite = true,
           clientSettings = {
             readPreference(ReadPreference.secondaryPreferred())
@@ -1201,11 +1204,15 @@ open class MongoDatabase(
     fun createMongoClientFromUri(
       connectionString: ConnectionString,
       allowReadFromSecondaries: Boolean,
+      allowStaleData: Boolean,
       useMajorityWrite: Boolean,
       clientSettings: (MongoClientSettings.Builder.() -> Unit)?
     ): MongoClient {
       if (!useMajorityWrite && allowReadFromSecondaries) {
         throw IllegalArgumentException("Reading from secondaries requires useMajorityWrite = true")
+      }
+      if (allowStaleData && !allowReadFromSecondaries) {
+        throw IllegalArgumentException("allowStaleData requires allowReadFromSecondaries = true")
       }
       return MongoClientSettings.builder()
         .applyConnectionString(connectionString)
@@ -1225,7 +1232,11 @@ open class MongoDatabase(
             allowReadFromSecondaries -> {
               // Set maxStalenessSeconds, see https://docs.mongodb.com/manual/core/read-preference/#maxstalenessseconds
               readPreference(ReadPreference.secondaryPreferred(90L, TimeUnit.SECONDS))
-              readConcern(ReadConcern.MAJORITY)
+              if (allowStaleData) {
+                readConcern(ReadConcern.AVAILABLE)
+              } else {
+                readConcern(ReadConcern.MAJORITY)
+              }
               writeConcern(WriteConcern.MAJORITY)
             }
 
