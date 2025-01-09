@@ -22,7 +22,7 @@ dependencies {
   implementation("com.fasterxml.jackson.core:jackson-core:2.14.2")
   implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.14.2")
 
-  implementation("ch.qos.logback:logback-classic:1.2.11")
+  implementation("ch.qos.logback:logback-classic:1.5.16")
 
   implementation("commons-codec:commons-codec:1.15")
 
