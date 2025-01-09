@@ -1,7 +1,6 @@
 package com.moshbit.katerbase
 
 import ch.qos.logback.classic.Level
-import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.LoggerContext
 import org.slf4j.LoggerFactory
 import org.apache.commons.codec.binary.Hex
@@ -10,9 +9,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 internal fun setLogLevel(name: String, level: Level) {
-  val loggerContext = LoggerFactory.getILoggerFactory() as LoggerContext
-  val logger = loggerContext.getLogger(name) as Logger
-  logger.level = level
+  (LoggerFactory.getILoggerFactory() as? LoggerContext)?.getLogger(name)?.apply {
+    this.level = level
+  } ?: throw IllegalStateException("Failed to set log level: Invalid logger context or logger.")
 }
 
 internal fun ByteArray.sha256(): String {
