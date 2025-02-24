@@ -1,11 +1,13 @@
 import com.moshbit.katerbase.*
+import io.sentry.Sentry
+import io.sentry.SentryOptions
+import io.sentry.protocol.SentryTransaction
 import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import util.addYears
 import util.forEachAsyncCoroutine
@@ -828,28 +830,73 @@ class SuspendingDatabaseTests {
     }
   }
 
+  @Test
+  fun sentryTracing() = runBlocking {
+    var latestTransaction: SentryTransaction? = null
+    Sentry.init { options: SentryOptions ->
+      options.isEnableExternalConfiguration = true
+      options.dsn = "http://1@localhost:8000/1" // A "valid" dsn is required, otherwise tracing info will not be collected
+      options.tracesSampleRate = 1.0
+      options.beforeSendTransaction = SentryOptions.BeforeSendTransactionCallback { transaction, hint ->
+        latestTransaction = transaction
+        return@BeforeSendTransactionCallback transaction
+      }
+    }
+
+    val transaction = Sentry.startTransaction("Test Transaction", "query")
+    val localTestDb = MongoDatabase(
+      "mongodb://localhost:27017/local",
+      getOrCreateSentrySpan = { transaction }
+    ) { testDbDefinition() }
+
+    localTestDb.getSuspendingCollection<SimpleMongoPayload>().bulkWrite {
+      repeat(10) { index ->
+        insertOne(SimpleMongoPayload().apply {
+          _id = index.toString()
+          double = index.toDouble()
+          string = index.toString()
+        }, upsert = false)
+      }
+    }
+
+    val count = localTestDb.getSuspendingCollection<SimpleMongoPayload>().find().batchSize(2).count()
+    println("Found $count items")
+    transaction.finish()
+
+    Sentry.flush(1_000)
+
+    assertEquals("Test Transaction", latestTransaction!!.transaction)
+    val span = latestTransaction!!.spans.single { it.op == "db.query" }
+    assertNotNull(span)
+    assertEquals("db.query", span.op)
+    assertEquals("mongodb", span.data!!["db.system"])
+    assertEquals("find", span.data!!["db.operation.name"])
+  }
+
 
   companion object {
     lateinit var testDb: MongoDatabase
 
-    @Suppress("unused")
+    /*@Suppress("unused")
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {
-      testDb = MongoDatabase("mongodb://localhost:27017/local") {
-        collection<EnumMongoPayload>("enumColl") {
-          index(EnumMongoPayload::value1.ascending())
-          index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
-          index(
-            EnumMongoPayload::nullableString.ascending(), partialIndex = arrayOf(
-              EnumMongoPayload::nullableString equal null
-            )
+      testDb = MongoDatabase("mongodb://localhost:27017/local") { testDbDefinition() }
+    }*/
+
+    private fun MongoDatabaseDefinition.testDbDefinition() {
+      collection<EnumMongoPayload>("enumColl") {
+        index(EnumMongoPayload::value1.ascending())
+        index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
+        index(
+          EnumMongoPayload::nullableString.ascending(), partialIndex = arrayOf(
+            EnumMongoPayload::nullableString equal null
           )
-        }
-        collection<SimpleMongoPayload>("simpleMongoColl")
-        collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
-        collection<OpenClassMongoPayload>("simpleMongoColl")
+        )
       }
+      collection<SimpleMongoPayload>("simpleMongoColl")
+      collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
+      collection<OpenClassMongoPayload>("simpleMongoColl")
     }
   }
 }
