@@ -4,7 +4,6 @@ import ch.qos.logback.classic.Level
 import com.mongodb.*
 import com.mongodb.bulk.BulkWriteResult
 import com.mongodb.client.*
-import com.mongodb.client.internal.MongoClientImpl
 import com.mongodb.client.model.*
 import com.mongodb.client.model.changestream.ChangeStreamDocument
 import com.mongodb.client.model.changestream.FullDocument
@@ -13,11 +12,9 @@ import com.mongodb.client.result.DeleteResult
 import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
 import io.sentry.ISpan
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import io.sentry.SpanStatus
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import org.bson.*
 import org.bson.conversions.Bson
 import java.util.*
@@ -25,6 +22,8 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.coroutineContext
 import kotlin.math.absoluteValue
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
@@ -50,7 +49,7 @@ open class MongoDatabase(
   autoCreateIndexes: Boolean = true,
   autoDeleteIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
-  private val getOrCreateSentrySpan: (CoroutineContext.() -> ISpan?)? = null,
+  private val getOrCreateSentrySpan: (CoroutineContext?.(name: String) -> ISpan?)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
 ) : AbstractMongoDatabase() {
   protected val client: MongoClient
@@ -85,12 +84,12 @@ open class MongoDatabase(
     // Sessions time out after 30 minutes, but close it now to save resources
     // https://www.mongodb.com/docs/manual/reference/command/startSession/
     transactionalDatabase.session.use { session ->
-      runOnIoWithTracing { session.startTransaction() }
+      runOnIo { session.startTransaction() }
       try {
         action(transactionalDatabase)
-        runOnIoWithTracing { session.commitTransaction() }
+        runOnIo { session.commitTransaction() }
       } catch (throwable: Throwable) {
-        runOnIoWithTracing { session.abortTransaction() } // Do not commit transaction to DB in case of exception.
+        runOnIo { session.abortTransaction() } // Do not commit transaction to DB in case of exception.
         throw throwable
       }
     }
@@ -1075,27 +1074,27 @@ open class MongoDatabase(
     }
 
     suspend fun drop() {
-      runOnIoWithTracing { blockingCollection.drop() }
+      runOnIoWithTracing("drop") { blockingCollection.drop() }
     }
 
     suspend fun clear(): DeleteResult {
-      return runOnIoWithTracing { blockingCollection.clear() }
+      return runOnIoWithTracing("clear") { blockingCollection.clear() }
     }
 
     suspend fun count(vararg filter: FilterPair): Long {
-      return runOnIoWithTracing { blockingCollection.count(*filter) }
+      return runOnIoWithTracing("count") { blockingCollection.count(*filter) }
     }
 
     suspend fun bulkWrite(
       options: BulkWriteOptions = BulkWriteOptions(),
       action: MongoCollection<Entry>.BulkOperation.() -> Unit
     ): BulkWriteResult {
-      return runOnIoWithTracing { blockingCollection.bulkWrite(options, action) }
+      return runOnIoWithTracing("bulkWrite") { blockingCollection.bulkWrite(options, action) }
     }
 
     suspend fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): FlowAggregateCursor<T> {
-      return runOnIoWithTracing {
-        FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass))
+      return runOnIoWithAsyncTracing("aggregate") { span, tracingContext ->
+        FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass), tracingContext, onCompletion = { span.completeCursor(it) })
       }
     }
 
@@ -1114,18 +1113,18 @@ open class MongoDatabase(
     }
 
     suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
-      return runOnIoWithTracing {
+      return runOnIoWithAsyncTracing("find") { span, tracingContext ->
         val cursor = blockingCollection.find(*filter)
-        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection)
+        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection, tracingContext, onCompletion = { span.completeCursor(it) })
       }
     }
 
     suspend fun findOne(vararg filter: FilterPair): Entry? {
-      return runOnIoWithTracing { blockingCollection.findOne(*filter) }
+      return runOnIoWithTracing("findOne") { blockingCollection.findOne(*filter) }
     }
 
     suspend fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
-      return runOnIoWithTracing { blockingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
+      return runOnIoWithTracing("findOneOrInsert") { blockingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
     }
 
     /**
@@ -1137,14 +1136,16 @@ open class MongoDatabase(
       entryClass: KClass<T>,
       vararg filter: FilterPair
     ): FlowDistinctCursor<T> {
-      return runOnIoWithTracing {
+      return runOnIoWithAsyncTracing("distinct") { span, tracingContext ->
         FlowDistinctCursor(
           mongoIterable = blockingCollection.internalCollection.distinct(
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
             /* resultClass = */ entryClass.java
           ),
-          clazz = entryClass
+          clazz = entryClass,
+          tracingContext = tracingContext,
+          onCompletion = { span.completeCursor(it) }
         )
       }
     }
@@ -1154,11 +1155,11 @@ open class MongoDatabase(
     }
 
     suspend fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIoWithTracing { blockingCollection.updateOne(*filter, update = update) }
+      return runOnIoWithTracing("updateOne") { blockingCollection.updateOne(*filter, update = update) }
     }
 
     suspend fun updateOneOrInsert(filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIoWithTracing { blockingCollection.updateOneOrInsert(filter, update = update) }
+      return runOnIoWithTracing("updateOneOrInsert") { blockingCollection.updateOneOrInsert(filter, update = update) }
     }
 
     suspend fun updateOneAndFind(
@@ -1167,7 +1168,7 @@ open class MongoDatabase(
       returnDocument: ReturnDocument = ReturnDocument.AFTER,
       update: MongoCollection<Entry>.UpdateOperation.() -> Unit
     ): Entry? {
-      return runOnIoWithTracing {
+      return runOnIoWithTracing("updateOneAndFind") {
         blockingCollection.updateOneAndFind(
           *filter,
           upsert = upsert,
@@ -1178,36 +1179,77 @@ open class MongoDatabase(
     }
 
     suspend fun updateMany(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIoWithTracing { blockingCollection.updateMany(*filter, update = update) }
+      return runOnIoWithTracing("updateMany") { blockingCollection.updateMany(*filter, update = update) }
     }
 
     suspend fun insertOne(document: Entry, upsert: Boolean) {
-      return runOnIoWithTracing { blockingCollection.insertOne(document, upsert) }
+      return runOnIoWithTracing("insertOne") { blockingCollection.insertOne(document, upsert) }
     }
 
     suspend fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
-      return runOnIoWithTracing { blockingCollection.insertOne(document, onDuplicateKey) }
+      return runOnIoWithTracing("insertOne") { blockingCollection.insertOne(document, onDuplicateKey) }
     }
 
     suspend fun deleteOne(vararg filter: FilterPair): DeleteResult {
-      return runOnIoWithTracing { blockingCollection.deleteOne(*filter) }
+      return runOnIoWithTracing("deleteOne") { blockingCollection.deleteOne(*filter) }
     }
 
     suspend fun deleteMany(vararg filter: FilterPair): DeleteResult {
-      return runOnIoWithTracing { blockingCollection.deleteMany(*filter) }
+      return runOnIoWithTracing("deleteMany") { blockingCollection.deleteMany(*filter) }
     }
 
     suspend fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
-      return runOnIoWithTracing { blockingCollection.getQueryStats(*filter, limit = limit) }
+      return runOnIoWithTracing("getQueryStats") { blockingCollection.getQueryStats(*filter, limit = limit) }
+    }
+
+    private suspend inline fun <R> runOnIoWithTracing(
+      operation: String,
+      crossinline block: suspend CoroutineScope.() -> R
+    ): R = runOnIoWithAsyncTracing(operation) { span, _ ->
+      try {
+        block()
+      } catch (e: Throwable) {
+        span?.throwable = e
+        throw e
+      } finally {
+        span?.status = when (span?.throwable) {
+          null -> SpanStatus.OK
+          is CancellationException -> SpanStatus.ABORTED
+          else -> SpanStatus.UNKNOWN_ERROR
+        }
+        span?.finish()
+      }
+    }
+
+    private suspend inline fun <R> runOnIoWithAsyncTracing(
+      operation: String,
+      crossinline block: suspend CoroutineScope.(span: ISpan?, tracingContext: CoroutineContext) -> R
+    ): R {
+      val name = "${this@MongoDatabase.internalDatabase.name}.${this@SuspendingMongoCollection.name}.$operation"
+      val span = this@MongoDatabase.getOrCreateSentrySpan?.invoke(coroutineContext, name)
+      span?.description = name
+      val tracingContext = SentryTracerContext.forSpan(span)
+      return runOnIo(tracingContext) {
+        block(span, tracingContext)
+      }
+    }
+
+    private fun ISpan?.completeCursor(cause: Throwable?) {
+      if (this == null) return
+      if (cause == null) {
+        this.status = SpanStatus.OK
+      } else {
+        this.status = if (cause is CancellationException) SpanStatus.ABORTED else SpanStatus.UNKNOWN_ERROR
+        this.throwable = cause
+      }
+      this.finish()
     }
   }
 
-  private suspend inline fun <R> runOnIoWithTracing(crossinline block: suspend CoroutineScope.() -> R): R = withContext(Dispatchers.IO) {
-    val context = ((client as? MongoClientImpl)?.settings?.contextProvider as? SynchronousContextProvider)?.context
-    if (context != null) this@MongoDatabase.getOrCreateSentrySpan?.invoke(coroutineContext)?.also(context::setSpan)
-
-    block()
-  }
+  private suspend inline fun <R> runOnIo(
+    context: CoroutineContext = EmptyCoroutineContext,
+    noinline block: suspend CoroutineScope.() -> R
+  ): R = withContext(Dispatchers.IO + context, block)
 
   companion object {
     var logAllQueries = false // Set this to true if you want to debug your database queries
@@ -1281,7 +1323,6 @@ open class MongoDatabase(
         }
         .apply {
           if (enableTracing) {
-            contextProvider(ThreadLocalSynchronousContextProvider())
             addCommandListener(SentryTracingListener())
           }
         }

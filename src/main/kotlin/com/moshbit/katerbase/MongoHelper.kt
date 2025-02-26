@@ -1,24 +1,14 @@
 package com.moshbit.katerbase
 
-import com.mongodb.RequestContext
-import com.mongodb.client.SynchronousContextProvider
 import com.mongodb.client.model.Accumulators
 import com.mongodb.client.model.Aggregates
 import com.mongodb.client.model.BsonField
 import com.mongodb.client.model.Projections
-import com.mongodb.event.CommandFailedEvent
-import com.mongodb.event.CommandListener
-import com.mongodb.event.CommandStartedEvent
-import com.mongodb.event.CommandSucceededEvent
-import io.sentry.ISpan
-import io.sentry.SpanStatus
 import org.bson.*
 import org.bson.conversions.Bson
 import java.security.SecureRandom
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
-import java.util.stream.Stream
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -480,75 +470,4 @@ class QueryStats(
   val executionSuccess get() = executionStatsRaw["executionSuccess"] as Boolean
   val returnedDocuments get() = executionStatsRaw["nReturned"] as Int
   val executionTimeMillis get() = executionStatsRaw["executionTimeMillis"] as Int
-}
-
-class SentryTracingListener : CommandListener {
-
-  override fun commandStarted(event: CommandStartedEvent) {
-    val context = event.requestContext ?: return
-    val span = context.getSpan()?.startChild("db.query", event.command.toParameterizedJson()) ?: return
-    context.setSpan(span) // TODO for a find this would create a new child for every getMore
-    span.setData("db.system", "mongodb")
-    span.setData("db.namespace", event.databaseName)
-    span.setData("db.operation.name", event.commandName)
-  }
-
-  override fun commandSucceeded(event: CommandSucceededEvent) {
-    val context = event.requestContext ?: return
-    context.getSpan()?.finish(SpanStatus.OK)
-    // TODO How to reset the span here when just doing context.resetSpan it would not work with getMore for cursors?
-    //  same for commandFailed
-  }
-
-  override fun commandFailed(event: CommandFailedEvent) {
-    val context = event.requestContext ?: return
-    val span = context.getSpan() ?: return
-    span.throwable = event.throwable
-    span.finish(SpanStatus.INTERNAL_ERROR)
-  }
-}
-
-class MapRequestContext : RequestContext {
-  private val map: MutableMap<Any, Any> = ConcurrentHashMap()
-
-  @Suppress("WRONG_NULLABILITY_FOR_JAVA_OVERRIDE")
-  override fun <T> get(key: Any): T? = map[key] as? T
-
-  override fun hasKey(key: Any): Boolean = map.containsKey(key)
-
-  override fun isEmpty(): Boolean = map.isEmpty()
-
-  override fun put(key: Any, value: Any) {
-    map[key] = value
-  }
-
-  override fun delete(key: Any) {
-    map.remove(key)
-  }
-
-  override fun size(): Int = map.size
-
-  override fun stream(): Stream<MutableMap.MutableEntry<Any, Any>> = map.entries.stream()
-}
-
-class ThreadLocalSynchronousContextProvider : SynchronousContextProvider {
-  private val threadLocalContext = ThreadLocal.withInitial { MapRequestContext() }
-
-  override fun getContext(): RequestContext {
-    return threadLocalContext.get()
-  }
-}
-
-private val sentrySpanKey = "SENTRY_SPAN_CONTEXT_KEY"
-
-fun RequestContext.setSpan(span: ISpan) {
-  put(sentrySpanKey, span)
-}
-
-fun RequestContext.getSpan(): ISpan? {
-  return get(sentrySpanKey)
-}
-
-fun RequestContext.resetSpan() {
-  delete(sentrySpanKey)
 }
