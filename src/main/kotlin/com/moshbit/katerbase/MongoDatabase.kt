@@ -11,6 +11,7 @@ import com.mongodb.client.model.changestream.OperationType
 import com.mongodb.client.result.DeleteResult
 import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
+import com.moshbit.katerbase.MongoDatabase.SuspendingMongoCollection
 import io.sentry.ISpan
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,9 @@ import kotlin.reflect.KMutableProperty1
  * 5) Install mongodb, type "brew install mongodb-community"
  * 6) Start the service, type "brew services start mongodb-community"
  * 7) Check if it worked using Studio 3t or just type "mongo" to open the mongo shell.
+ *
+ * @param createSentrySpan provide to enable sentry performance/tracing. Currently tracing only works for [SuspendingMongoCollection]s.
+ * The lambda must return a new transaction or child span. The returned span will be finished automatically after query execution.
  */
 
 open class MongoDatabase(
@@ -51,7 +55,7 @@ open class MongoDatabase(
   autoCreateIndexes: Boolean = true,
   autoDeleteIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
-  private val getOrCreateSentrySpan: (CoroutineContext?.(name: String) -> ISpan?)? = null,
+  private val createSentrySpan: (CoroutineContext?.(name: String) -> ISpan?)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
 ) : AbstractMongoDatabase() {
   protected val client: MongoClient
@@ -62,7 +66,7 @@ open class MongoDatabase(
   protected val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
   protected val secondaryCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
 
-  private inline val enableTracing get() = getOrCreateSentrySpan != null
+  private inline val enableTracing get() = createSentrySpan != null
 
   override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
@@ -80,7 +84,7 @@ open class MongoDatabase(
    */
   suspend fun executeTransaction(action: suspend (database: TransactionalDatabase) -> Unit) {
     require(supportChangeStreams) { "supportChangeStreams must be true for the executeTransaction() operation, transactions are only supported on replica sets." }
-    val transactionalDatabase = withContext(Dispatchers.IO) { TransactionalDatabase() }
+    val transactionalDatabase = runOnIo { TransactionalDatabase() }
 
     // Sessions time out after 30 minutes, but close it now to save resources
     // https://www.mongodb.com/docs/manual/reference/command/startSession/
@@ -1221,7 +1225,7 @@ open class MongoDatabase(
       crossinline block: suspend CoroutineScope.(tracingContext: TraceContext?) -> R
     ): R {
       val name = "${blockingCollection.internalCollection.namespace.fullName}.$operation"
-      val tracingContext = this@MongoDatabase.getOrCreateSentrySpan?.invoke(coroutineContext, name)?.let { span ->
+      val tracingContext = this@MongoDatabase.createSentrySpan?.invoke(coroutineContext, name)?.let { span ->
         span.description = name
         TraceContext(span)
       }

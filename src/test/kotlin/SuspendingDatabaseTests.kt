@@ -917,7 +917,7 @@ class SuspendingDatabaseTests {
       autoCreateCollections = autoCreate,
       autoCreateIndexes = autoCreate,
       autoDeleteIndexes = autoCreate,
-      getOrCreateSentrySpan = getOrCreateSentrySpan,
+      createSentrySpan = getOrCreateSentrySpan,
     ) {
       collection<EnumMongoPayload>("enumColl") {
         index(EnumMongoPayload::value1.ascending())
