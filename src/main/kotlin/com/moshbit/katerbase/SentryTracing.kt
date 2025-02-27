@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.cancellation.CancellationException
 
 internal object SentryTracer {
   private val threadLocalContext: ThreadLocal<TraceContext?> = ThreadLocal()
@@ -48,7 +49,7 @@ internal class SentryTracerContext(
   companion object {
     private object Key : CoroutineContext.Key<SentryTracerContext>
 
-    fun forSpan(rootSpan: ISpan?) = if (rootSpan == null) EmptyCoroutineContext else SentryTracerContext(TraceContext(rootSpan))
+    operator fun invoke(context: TraceContext?) = if (context == null) EmptyCoroutineContext else SentryTracerContext(context)
   }
 }
 
@@ -80,27 +81,40 @@ internal class TraceContext(private val rootSpan: ISpan) {
     }
   }
 
-  // For those commands the value of the field with the command name is the collection name
-  // e.g. { "aggregate": "collectionName", ... }
-  private val COMMANDS_WITH_COLLECTION_NAME: Set<String> = setOf(
-    "aggregate", "count", "distinct", "mapReduce", "geoSearch", "delete", "find", "findAndModify",
-    "insert", "update", "collMod", "compact", "convertToCapped", "create", "createIndexes", "drop", "dropIndexes",
-    "killCursors", "listIndexes", "reIndex"
-  )
-
-  private val CommandStartedEvent.collectionName: String?
-    get() {
-      fun BsonValue.stringOrNull(): String? {
-        val stringValue = takeIf { it.isString }?.asString()?.value?.trim()
-        return if (stringValue.isNullOrEmpty()) null else stringValue
-      }
-
-      if (this.commandName in COMMANDS_WITH_COLLECTION_NAME) {
-        val collectionName = command[commandName]?.stringOrNull()
-        if (collectionName != null) return collectionName
-      }
-
-      // Some commands (e.g. getMore) have a dedicated collection field
-      return command["collection"]?.stringOrNull()
+  fun finishRoot(cause: Throwable? = null) {
+    if (this.rootSpan.isFinished) return
+    if (cause == null) {
+      this.rootSpan.status = SpanStatus.OK
+    } else {
+      this.rootSpan.status = if (cause is CancellationException) SpanStatus.ABORTED else SpanStatus.UNKNOWN_ERROR
+      this.rootSpan.throwable = cause
     }
+    this.rootSpan.finish()
+  }
+
+  companion object {
+    // For those commands the value of the field with the command name is the collection name
+    // e.g. { "aggregate": "collectionName", ... }
+    private val COMMANDS_WITH_COLLECTION_NAME: Set<String> = setOf(
+      "aggregate", "count", "distinct", "mapReduce", "geoSearch", "delete", "find", "findAndModify",
+      "insert", "update", "collMod", "compact", "convertToCapped", "create", "createIndexes", "drop", "dropIndexes",
+      "killCursors", "listIndexes", "reIndex"
+    )
+
+    private val CommandStartedEvent.collectionName: String?
+      get() {
+        fun BsonValue.stringOrNull(): String? {
+          val stringValue = takeIf { it.isString }?.asString()?.value?.trim()
+          return if (stringValue.isNullOrEmpty()) null else stringValue
+        }
+
+        if (this.commandName in COMMANDS_WITH_COLLECTION_NAME) {
+          val collectionName = command[commandName]?.stringOrNull()
+          if (collectionName != null) return collectionName
+        }
+
+        // Some commands (e.g. getMore) have a dedicated collection field
+        return command["collection"]?.stringOrNull()
+      }
+  }
 }

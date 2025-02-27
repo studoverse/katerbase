@@ -12,9 +12,11 @@ import com.mongodb.client.result.DeleteResult
 import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
 import io.sentry.ISpan
-import io.sentry.SpanStatus
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.bson.*
 import org.bson.conversions.Bson
 import java.util.*
@@ -62,14 +64,13 @@ open class MongoDatabase(
 
   private inline val enableTracing get() = getOrCreateSentrySpan != null
 
-  open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
+  override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
     return mongoCollections[entryClass] as? MongoCollection<T>
       ?: throw IllegalArgumentException("No collection exists for ${entryClass.simpleName}")
   }
 
-
-  open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
+  override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
     return SuspendingMongoCollection(blockingCollection = getCollection(entryClass))
   }
 
@@ -609,13 +610,13 @@ open class MongoDatabase(
             /* clientSession = */ session,
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ entryClass.java
+            /* resultClass = */ Document::class.java
           )
         } else {
           internalCollection.distinct(
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ entryClass.java
+            /* resultClass = */ Document::class.java
           )
         },
         clazz = entryClass
@@ -964,7 +965,7 @@ open class MongoDatabase(
        * More info: https://docs.mongodb.com/manual/reference/operator/update/pull/
        */
       fun <Value> MongoEntryField<List<Value>>.pullWhere(vararg filter: FilterPair) {
-        updateMutator(operator = "pull", mutator = PushPair(this, Document(filter.map { it.key.fieldName to it.value }.toMap())))
+        updateMutator(operator = "pull", mutator = PushPair(this, Document(filter.associate { it.key.fieldName to it.value })))
       }
     }
 
@@ -1093,8 +1094,8 @@ open class MongoDatabase(
     }
 
     suspend fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): FlowAggregateCursor<T> {
-      return runOnIoWithAsyncTracing("aggregate") { span, tracingContext ->
-        FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass), tracingContext, onCompletion = { span.completeCursor(it) })
+      return runOnIoWithManualTracing("aggregate") { tracingContext ->
+        FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass), tracingContext)
       }
     }
 
@@ -1113,9 +1114,9 @@ open class MongoDatabase(
     }
 
     suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
-      return runOnIoWithAsyncTracing("find") { span, tracingContext ->
+      return runOnIoWithManualTracing("find") { tracingContext ->
         val cursor = blockingCollection.find(*filter)
-        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection, tracingContext, onCompletion = { span.completeCursor(it) })
+        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection, tracingContext)
       }
     }
 
@@ -1136,16 +1137,15 @@ open class MongoDatabase(
       entryClass: KClass<T>,
       vararg filter: FilterPair
     ): FlowDistinctCursor<T> {
-      return runOnIoWithAsyncTracing("distinct") { span, tracingContext ->
+      return runOnIoWithManualTracing("distinct") { tracingContext ->
         FlowDistinctCursor(
           mongoIterable = blockingCollection.internalCollection.distinct(
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ entryClass.java
+            /* resultClass = */ Document::class.java
           ),
           clazz = entryClass,
           tracingContext = tracingContext,
-          onCompletion = { span.completeCursor(it) }
         )
       }
     }
@@ -1205,44 +1205,29 @@ open class MongoDatabase(
     private suspend inline fun <R> runOnIoWithTracing(
       operation: String,
       crossinline block: suspend CoroutineScope.() -> R
-    ): R = runOnIoWithAsyncTracing(operation) { span, _ ->
+    ): R = runOnIoWithManualTracing(operation) { tracingContext ->
       try {
         block()
       } catch (e: Throwable) {
-        span?.throwable = e
+        tracingContext?.finishRoot(e)
         throw e
       } finally {
-        span?.status = when (span?.throwable) {
-          null -> SpanStatus.OK
-          is CancellationException -> SpanStatus.ABORTED
-          else -> SpanStatus.UNKNOWN_ERROR
-        }
-        span?.finish()
+        tracingContext?.finishRoot()
       }
     }
 
-    private suspend inline fun <R> runOnIoWithAsyncTracing(
+    private suspend inline fun <R> runOnIoWithManualTracing(
       operation: String,
-      crossinline block: suspend CoroutineScope.(span: ISpan?, tracingContext: CoroutineContext) -> R
+      crossinline block: suspend CoroutineScope.(tracingContext: TraceContext?) -> R
     ): R {
-      val name = "${this@MongoDatabase.internalDatabase.name}.${this@SuspendingMongoCollection.name}.$operation"
-      val span = this@MongoDatabase.getOrCreateSentrySpan?.invoke(coroutineContext, name)
-      span?.description = name
-      val tracingContext = SentryTracerContext.forSpan(span)
-      return runOnIo(tracingContext) {
-        block(span, tracingContext)
+      val name = "${blockingCollection.internalCollection.namespace.fullName}.$operation"
+      val tracingContext = this@MongoDatabase.getOrCreateSentrySpan?.invoke(coroutineContext, name)?.let { span ->
+        span.description = name
+        TraceContext(span)
       }
-    }
-
-    private fun ISpan?.completeCursor(cause: Throwable?) {
-      if (this == null) return
-      if (cause == null) {
-        this.status = SpanStatus.OK
-      } else {
-        this.status = if (cause is CancellationException) SpanStatus.ABORTED else SpanStatus.UNKNOWN_ERROR
-        this.throwable = cause
+      return runOnIo(SentryTracerContext(tracingContext)) {
+        block(tracingContext)
       }
-      this.finish()
     }
   }
 

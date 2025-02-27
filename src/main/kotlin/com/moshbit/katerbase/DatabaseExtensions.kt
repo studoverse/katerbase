@@ -14,33 +14,29 @@ import org.bson.BsonInt32
 import org.bson.Document
 import org.bson.conversions.Bson
 import java.io.IOException
-import kotlin.coroutines.CoroutineContext
 import kotlin.reflect.KClass
 
-abstract class AbstractDistinctCursor<Entry : Any>(val mongoIterable: DistinctIterable<Entry>, val clazz: KClass<Entry>)
+abstract class AbstractDistinctCursor<Entry : Any>(val mongoIterable: DistinctIterable<Document>, val clazz: KClass<Entry>)
 
-class DistinctCursor<Entry : Any>(mongoIterable: DistinctIterable<Entry>, clazz: KClass<Entry>) :
+class DistinctCursor<Entry : Any>(mongoIterable: DistinctIterable<Document>, clazz: KClass<Entry>) :
   AbstractDistinctCursor<Entry>(mongoIterable, clazz), Iterable<Entry> {
-  override fun iterator(): Iterator<Entry> = mongoIterable.iterator()
+  override fun iterator(): Iterator<Entry> = iteratorForDocumentClass(mongoIterable, clazz)
 }
 
-class FlowDistinctCursor<Entry : Any>(
-  mongoIterable: DistinctIterable<Entry>,
+class FlowDistinctCursor<Entry : Any> internal constructor(
+  mongoIterable: DistinctIterable<Document>,
   clazz: KClass<Entry>,
-  tracingContext: CoroutineContext,
-  onCompletion: suspend FlowCollector<Entry>.(cause: Throwable?) -> Unit
-) : AbstractDistinctCursor<Entry>(mongoIterable, clazz),
-  Flow<Entry> by mongoIterable.asFlow().flowOn(Dispatchers.IO + tracingContext).onCompletion(onCompletion)
+  tracingContext: TraceContext?,
+) : AbstractDistinctCursor<Entry>(mongoIterable, clazz), Flow<Entry> by flowForDocumentClass(mongoIterable, clazz, tracingContext)
 
 class AggregateCursor<Entry : Any>(val mongoIterable: AggregateIterable<Document>, val clazz: KClass<Entry>) : Iterable<Entry> {
   override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
 }
 
-class FlowAggregateCursor<Entry : Any>(
+class FlowAggregateCursor<Entry : Any> internal constructor(
   aggregateCursor: AggregateCursor<Entry>,
-  tracingContext: CoroutineContext,
-  onCompletion: suspend FlowCollector<Entry>.(cause: Throwable?) -> Unit
-) : Flow<Entry> by flowForDocumentClass(aggregateCursor.mongoIterable, aggregateCursor.clazz, tracingContext, onCompletion)
+  tracingContext: TraceContext?,
+) : Flow<Entry> by flowForDocumentClass(aggregateCursor.mongoIterable, aggregateCursor.clazz, tracingContext)
 
 abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindCursor<Entry, Cursor>>(
   val mongoIterable: FindIterable<Document>,
@@ -175,14 +171,13 @@ class FindCursor<Entry : MongoMainEntry>(
   override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
 }
 
-class FlowFindCursor<Entry : MongoMainEntry>(
+class FlowFindCursor<Entry : MongoMainEntry> internal constructor(
   mongoIterable: FindIterable<Document>,
   clazz: KClass<Entry>,
   collection: MongoDatabase.MongoCollection<Entry>,
-  tracingContext: CoroutineContext,
-  onCompletion: suspend FlowCollector<Entry>.(cause: Throwable?) -> Unit,
+  tracingContext: TraceContext?,
 ) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(mongoIterable, clazz, collection),
-  Flow<Entry> by flowForDocumentClass(mongoIterable, clazz, tracingContext, onCompletion) {
+  Flow<Entry> by flowForDocumentClass(mongoIterable, clazz, tracingContext) {
 
   @Deprecated("Flow analogue of 'forEach' is 'collect'", replaceWith = ReplaceWith("collect(block)"))
   suspend inline fun forEach(noinline block: (Entry) -> Unit) = collect(block)
@@ -191,13 +186,12 @@ class FlowFindCursor<Entry : MongoMainEntry>(
 private fun <Entry : Any> flowForDocumentClass(
   mongoIterable: MongoIterable<out Document>,
   clazz: KClass<Entry>,
-  tracingContext: CoroutineContext,
-  onCompletion: suspend FlowCollector<Entry>.(cause: Throwable?) -> Unit
+  tracingContext: TraceContext?,
 ): Flow<Entry> = mongoIterable
   .asFlow()
   .map { document -> deserialize(document, clazz) }
-  .flowOn(Dispatchers.IO + tracingContext)
-  .onCompletion(onCompletion)
+  .flowOn(Dispatchers.IO + SentryTracerContext(tracingContext))
+  .onCompletion { tracingContext?.finishRoot(it) }
 
 private fun <Entry : Any> iteratorForDocumentClass(
   mongoIterable: MongoIterable<out Document>,
