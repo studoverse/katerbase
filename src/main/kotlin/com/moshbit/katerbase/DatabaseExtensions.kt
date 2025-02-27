@@ -8,10 +8,7 @@ import com.mongodb.client.FindIterable
 import com.mongodb.client.MongoIterable
 import com.mongodb.client.model.Sorts
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.*
 import org.bson.BsonDocument
 import org.bson.BsonInt32
 import org.bson.Document
@@ -26,17 +23,20 @@ class DistinctCursor<Entry : Any>(mongoIterable: DistinctIterable<Entry>, clazz:
   override fun iterator(): Iterator<Entry> = mongoIterable.iterator()
 }
 
-class FlowDistinctCursor<Entry : Any>(
-  mongoIterable: DistinctIterable<Entry>, clazz: KClass<Entry>
-) : AbstractDistinctCursor<Entry>(mongoIterable, clazz), Flow<Entry> by mongoIterable.asFlow().flowOn(Dispatchers.IO)
+class FlowDistinctCursor<Entry : Any> internal constructor(
+  mongoIterable: DistinctIterable<Entry>,
+  clazz: KClass<Entry>,
+  tracingContext: TraceContext?,
+) : AbstractDistinctCursor<Entry>(mongoIterable, clazz), Flow<Entry> by flowForEntry(mongoIterable, tracingContext)
 
 class AggregateCursor<Entry : Any>(val mongoIterable: AggregateIterable<Document>, val clazz: KClass<Entry>) : Iterable<Entry> {
   override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
 }
 
-class FlowAggregateCursor<Entry : Any>(
-  aggregateCursor: AggregateCursor<Entry>
-) : Flow<Entry> by flowForDocumentClass(aggregateCursor.mongoIterable, aggregateCursor.clazz)
+class FlowAggregateCursor<Entry : Any> internal constructor(
+  aggregateCursor: AggregateCursor<Entry>,
+  tracingContext: TraceContext?,
+) : Flow<Entry> by flowForDocumentClass(aggregateCursor.mongoIterable, aggregateCursor.clazz, tracingContext)
 
 abstract class AbstractFindCursor<Entry : MongoMainEntry, Cursor : AbstractFindCursor<Entry, Cursor>>(
   val mongoIterable: FindIterable<Document>,
@@ -171,12 +171,13 @@ class FindCursor<Entry : MongoMainEntry>(
   override fun iterator() = iteratorForDocumentClass(mongoIterable, clazz)
 }
 
-class FlowFindCursor<Entry : MongoMainEntry>(
+class FlowFindCursor<Entry : MongoMainEntry> internal constructor(
   mongoIterable: FindIterable<Document>,
   clazz: KClass<Entry>,
   collection: MongoDatabase.MongoCollection<Entry>,
+  tracingContext: TraceContext?,
 ) : AbstractFindCursor<Entry, FlowFindCursor<Entry>>(mongoIterable, clazz, collection),
-  Flow<Entry> by flowForDocumentClass(mongoIterable, clazz) {
+  Flow<Entry> by flowForDocumentClass(mongoIterable, clazz, tracingContext) {
 
   @Deprecated("Flow analogue of 'forEach' is 'collect'", replaceWith = ReplaceWith("collect(block)"))
   suspend inline fun forEach(noinline block: (Entry) -> Unit) = collect(block)
@@ -184,11 +185,21 @@ class FlowFindCursor<Entry : MongoMainEntry>(
 
 private fun <Entry : Any> flowForDocumentClass(
   mongoIterable: MongoIterable<out Document>,
-  clazz: KClass<Entry>
+  clazz: KClass<Entry>,
+  tracingContext: TraceContext?,
 ): Flow<Entry> = mongoIterable
   .asFlow()
   .map { document -> deserialize(document, clazz) }
-  .flowOn(Dispatchers.IO)
+  .flowOn(Dispatchers.IO + SentryTracerContext(tracingContext))
+  .onCompletion { tracingContext?.finishRoot(it) }
+
+private fun <Entry : Any> flowForEntry(
+  mongoIterable: DistinctIterable<Entry>,
+  tracingContext: TraceContext?
+): Flow<Entry> = mongoIterable
+  .asFlow()
+  .flowOn(Dispatchers.IO + SentryTracerContext(tracingContext))
+  .onCompletion { tracingContext?.finishRoot(it) }
 
 private fun <Entry : Any> iteratorForDocumentClass(
   mongoIterable: MongoIterable<out Document>,

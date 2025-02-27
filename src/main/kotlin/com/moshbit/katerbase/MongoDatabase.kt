@@ -3,10 +3,7 @@ package com.moshbit.katerbase
 import ch.qos.logback.classic.Level
 import com.mongodb.*
 import com.mongodb.bulk.BulkWriteResult
-import com.mongodb.client.ClientSession
-import com.mongodb.client.FindIterable
-import com.mongodb.client.MongoClient
-import com.mongodb.client.MongoClients
+import com.mongodb.client.*
 import com.mongodb.client.model.*
 import com.mongodb.client.model.changestream.ChangeStreamDocument
 import com.mongodb.client.model.changestream.FullDocument
@@ -14,6 +11,8 @@ import com.mongodb.client.model.changestream.OperationType
 import com.mongodb.client.result.DeleteResult
 import com.mongodb.client.result.InsertOneResult
 import com.mongodb.client.result.UpdateResult
+import com.moshbit.katerbase.MongoDatabase.SuspendingMongoCollection
+import io.sentry.ISpan
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -25,6 +24,9 @@ import java.util.*
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.coroutineContext
 import kotlin.math.absoluteValue
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
@@ -38,6 +40,9 @@ import kotlin.reflect.KMutableProperty1
  * 5) Install mongodb, type "brew install mongodb-community"
  * 6) Start the service, type "brew services start mongodb-community"
  * 7) Check if it worked using Studio 3t or just type "mongo" to open the mongo shell.
+ *
+ * @param createSentrySpan provide to enable sentry performance/tracing. Currently tracing only works for [SuspendingMongoCollection]s.
+ * The lambda must return a new transaction or child span. The returned span will be finished automatically after query execution.
  */
 
 open class MongoDatabase(
@@ -50,6 +55,7 @@ open class MongoDatabase(
   autoCreateIndexes: Boolean = true,
   autoDeleteIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
+  private val createSentrySpan: ((context: CoroutineContext?, name: String) -> ISpan?)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
 ) : AbstractMongoDatabase() {
   protected val client: MongoClient
@@ -60,14 +66,15 @@ open class MongoDatabase(
   protected val changeStreamCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
   protected val secondaryCollections: Map<KClass<out MongoMainEntry>, MongoCollection<out MongoMainEntry>>
 
-  open override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
+  private inline val enableTracing get() = createSentrySpan != null
+
+  override fun <T : MongoMainEntry> getCollection(entryClass: KClass<T>): MongoCollection<T> {
     @Suppress("UNCHECKED_CAST")
     return mongoCollections[entryClass] as? MongoCollection<T>
       ?: throw IllegalArgumentException("No collection exists for ${entryClass.simpleName}")
   }
 
-
-  open override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
+  override fun <T : MongoMainEntry> getSuspendingCollection(entryClass: KClass<T>): SuspendingMongoCollection<T> {
     return SuspendingMongoCollection(blockingCollection = getCollection(entryClass))
   }
 
@@ -139,16 +146,18 @@ open class MongoDatabase(
 
     client = createMongoClientFromUri(
       connectionString, allowReadFromSecondaries = allowReadFromSecondaries, useMajorityWrite = useMajorityWrite,
-      clientSettings = clientSettings, allowStaleData = allowStaleData
+      clientSettings = clientSettings, allowStaleData = allowStaleData, enableTracing = enableTracing
     )
 
     val readChangeStreamFromSecondary = System.getenv("KATERBASE_READ_CHANGESTREAM_FROM_SECONDARY") == "true"
 
     changeStreamClient = if (supportChangeStreams) {
-      createMongoClientFromUri(connectionString,
+      createMongoClientFromUri(
+        connectionString,
         allowReadFromSecondaries = readChangeStreamFromSecondary,
         allowStaleData = allowStaleData,
         useMajorityWrite = readChangeStreamFromSecondary,
+        enableTracing = enableTracing,
         clientSettings = {
           if (readChangeStreamFromSecondary) {
             readPreference(ReadPreference.secondaryPreferred())
@@ -170,10 +179,12 @@ open class MongoDatabase(
       allowReadFromSecondaries -> client // Reuse default client because it's only reading from secondaries
       supportChangeStreams && readChangeStreamFromSecondary -> changeStreamClient // Reuse changeStream client because it's only reading from secondaries
       else -> {
-        createMongoClientFromUri(connectionString,
+        createMongoClientFromUri(
+          connectionString,
           allowReadFromSecondaries = true,
           allowStaleData = allowStaleData,
           useMajorityWrite = true,
+          enableTracing = enableTracing,
           clientSettings = {
             readPreference(ReadPreference.secondaryPreferred())
 
@@ -462,15 +473,16 @@ open class MongoDatabase(
         }
       }
 
-      fun createIndex(): String? = internalCollection.createIndex(bson, IndexOptions()
-        .background(true)
-        .apply {
-          if (partialIndex != null) {
-            partialFilterExpression(partialIndex)
+      fun createIndex(): String? = internalCollection.createIndex(
+        bson, IndexOptions()
+          .background(true)
+          .apply {
+            if (partialIndex != null) {
+              partialFilterExpression(partialIndex)
+            }
           }
-        }
-        .apply { indexOptions?.invoke(this) }
-        .name(indexName) // Set name after indexOptions invoke, as our index management relies on that name
+          .apply { indexOptions?.invoke(this) }
+          .name(indexName) // Set name after indexOptions invoke, as our index management relies on that name
       )
     }
 
@@ -957,7 +969,7 @@ open class MongoDatabase(
        * More info: https://docs.mongodb.com/manual/reference/operator/update/pull/
        */
       fun <Value> MongoEntryField<List<Value>>.pullWhere(vararg filter: FilterPair) {
-        updateMutator(operator = "pull", mutator = PushPair(this, Document(filter.map { it.key.fieldName to it.value }.toMap())))
+        updateMutator(operator = "pull", mutator = PushPair(this, Document(filter.associate { it.key.fieldName to it.value })))
       }
     }
 
@@ -1067,26 +1079,28 @@ open class MongoDatabase(
     }
 
     suspend fun drop() {
-      runOnIo { blockingCollection.drop() }
+      runOnIoWithTracing("drop") { blockingCollection.drop() }
     }
 
     suspend fun clear(): DeleteResult {
-      return runOnIo { blockingCollection.clear() }
+      return runOnIoWithTracing("clear") { blockingCollection.clear() }
     }
 
     suspend fun count(vararg filter: FilterPair): Long {
-      return runOnIo { blockingCollection.count(*filter) }
+      return runOnIoWithTracing("count") { blockingCollection.count(*filter) }
     }
 
     suspend fun bulkWrite(
       options: BulkWriteOptions = BulkWriteOptions(),
       action: MongoCollection<Entry>.BulkOperation.() -> Unit
     ): BulkWriteResult {
-      return runOnIo { blockingCollection.bulkWrite(options, action) }
+      return runOnIoWithTracing("bulkWrite") { blockingCollection.bulkWrite(options, action) }
     }
 
     suspend fun <T : MongoEntry> aggregate(pipeline: AggregationPipeline, entryClass: KClass<T>): FlowAggregateCursor<T> {
-      return runOnIo { FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass)) }
+      return runOnIoWithManualTracing("aggregate") { tracingContext ->
+        FlowAggregateCursor(blockingCollection.aggregate(pipeline, entryClass), tracingContext)
+      }
     }
 
     suspend inline fun <reified T : MongoEntry> aggregate(noinline pipeline: AggregationPipeline.() -> Unit): FlowAggregateCursor<T> {
@@ -1104,18 +1118,18 @@ open class MongoDatabase(
     }
 
     suspend fun find(vararg filter: FilterPair): FlowFindCursor<Entry> {
-      return withContext(Dispatchers.IO) {
+      return runOnIoWithManualTracing("find") { tracingContext ->
         val cursor = blockingCollection.find(*filter)
-        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection)
+        FlowFindCursor(cursor.mongoIterable, cursor.clazz, cursor.collection, tracingContext)
       }
     }
 
     suspend fun findOne(vararg filter: FilterPair): Entry? {
-      return runOnIo { blockingCollection.findOne(*filter) }
+      return runOnIoWithTracing("findOne") { blockingCollection.findOne(*filter) }
     }
 
     suspend fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
-      return runOnIo { blockingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
+      return runOnIoWithTracing("findOneOrInsert") { blockingCollection.findOneOrInsert(*filter, newEntry = newEntry) }
     }
 
     /**
@@ -1127,14 +1141,15 @@ open class MongoDatabase(
       entryClass: KClass<T>,
       vararg filter: FilterPair
     ): FlowDistinctCursor<T> {
-      return runOnIo {
+      return runOnIoWithManualTracing("distinct") { tracingContext ->
         FlowDistinctCursor(
           mongoIterable = blockingCollection.internalCollection.distinct(
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
             /* resultClass = */ entryClass.java
           ),
-          clazz = entryClass
+          clazz = entryClass,
+          tracingContext = tracingContext,
         )
       }
     }
@@ -1144,11 +1159,11 @@ open class MongoDatabase(
     }
 
     suspend fun updateOne(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { blockingCollection.updateOne(*filter, update = update) }
+      return runOnIoWithTracing("updateOne") { blockingCollection.updateOne(*filter, update = update) }
     }
 
     suspend fun updateOneOrInsert(filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { blockingCollection.updateOneOrInsert(filter, update = update) }
+      return runOnIoWithTracing("updateOneOrInsert") { blockingCollection.updateOneOrInsert(filter, update = update) }
     }
 
     suspend fun updateOneAndFind(
@@ -1157,33 +1172,73 @@ open class MongoDatabase(
       returnDocument: ReturnDocument = ReturnDocument.AFTER,
       update: MongoCollection<Entry>.UpdateOperation.() -> Unit
     ): Entry? {
-      return runOnIo { blockingCollection.updateOneAndFind(*filter, upsert = upsert, returnDocument = returnDocument, update = update) }
+      return runOnIoWithTracing("updateOneAndFind") {
+        blockingCollection.updateOneAndFind(
+          *filter,
+          upsert = upsert,
+          returnDocument = returnDocument,
+          update = update
+        )
+      }
     }
 
     suspend fun updateMany(vararg filter: FilterPair, update: MongoCollection<Entry>.UpdateOperation.() -> Unit): UpdateResult {
-      return runOnIo { blockingCollection.updateMany(*filter, update = update) }
+      return runOnIoWithTracing("updateMany") { blockingCollection.updateMany(*filter, update = update) }
     }
 
     suspend fun insertOne(document: Entry, upsert: Boolean) {
-      return runOnIo { blockingCollection.insertOne(document, upsert) }
+      return runOnIoWithTracing("insertOne") { blockingCollection.insertOne(document, upsert) }
     }
 
     suspend fun insertOne(document: Entry, onDuplicateKey: (() -> Unit)): InsertOneResult? {
-      return runOnIo { blockingCollection.insertOne(document, onDuplicateKey) }
+      return runOnIoWithTracing("insertOne") { blockingCollection.insertOne(document, onDuplicateKey) }
     }
 
     suspend fun deleteOne(vararg filter: FilterPair): DeleteResult {
-      return runOnIo { blockingCollection.deleteOne(*filter) }
+      return runOnIoWithTracing("deleteOne") { blockingCollection.deleteOne(*filter) }
     }
 
     suspend fun deleteMany(vararg filter: FilterPair): DeleteResult {
-      return runOnIo { blockingCollection.deleteMany(*filter) }
+      return runOnIoWithTracing("deleteMany") { blockingCollection.deleteMany(*filter) }
     }
 
     suspend fun getQueryStats(vararg filter: FilterPair, limit: Int? = null): QueryStats {
-      return runOnIo { blockingCollection.getQueryStats(*filter, limit = limit) }
+      return runOnIoWithTracing("getQueryStats") { blockingCollection.getQueryStats(*filter, limit = limit) }
+    }
+
+    private suspend inline fun <R> runOnIoWithTracing(
+      operation: String,
+      crossinline block: suspend CoroutineScope.() -> R
+    ): R = runOnIoWithManualTracing(operation) { tracingContext ->
+      try {
+        block()
+      } catch (e: Throwable) {
+        tracingContext?.finishRoot(e)
+        throw e
+      } finally {
+        tracingContext?.finishRoot()
+      }
+    }
+
+    private suspend inline fun <R> runOnIoWithManualTracing(
+      operation: String,
+      crossinline block: suspend CoroutineScope.(tracingContext: TraceContext?) -> R
+    ): R {
+      val name = "${blockingCollection.internalCollection.namespace.fullName}.$operation"
+      val tracingContext = this@MongoDatabase.createSentrySpan?.invoke(coroutineContext, name)?.let { span ->
+        span.description = name
+        TraceContext(span)
+      }
+      return runOnIo(SentryTracerContext(tracingContext)) {
+        block(tracingContext)
+      }
     }
   }
+
+  private suspend inline fun <R> runOnIo(
+    context: CoroutineContext = EmptyCoroutineContext,
+    noinline block: suspend CoroutineScope.() -> R
+  ): R = withContext(Dispatchers.IO + context, block)
 
   companion object {
     var logAllQueries = false // Set this to true if you want to debug your database queries
@@ -1206,6 +1261,7 @@ open class MongoDatabase(
       allowReadFromSecondaries: Boolean,
       allowStaleData: Boolean,
       useMajorityWrite: Boolean,
+      enableTracing: Boolean,
       clientSettings: (MongoClientSettings.Builder.() -> Unit)?
     ): MongoClient {
       if (!useMajorityWrite && allowReadFromSecondaries) {
@@ -1254,12 +1310,13 @@ open class MongoDatabase(
 
           clientSettings?.invoke(this)
         }
+        .apply {
+          if (enableTracing) {
+            addCommandListener(SentryTracingListener())
+          }
+        }
         .build()
         .let { MongoClients.create(it) }
-    }
-
-    private suspend fun <R> runOnIo(block: suspend CoroutineScope.() -> R): R {
-      return withContext(Dispatchers.IO, block)
     }
   }
 }

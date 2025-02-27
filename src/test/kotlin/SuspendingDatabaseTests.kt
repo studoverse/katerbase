@@ -1,7 +1,12 @@
 import com.moshbit.katerbase.*
+import io.sentry.ISpan
+import io.sentry.Sentry
+import io.sentry.SentryOptions
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
@@ -10,6 +15,7 @@ import org.junit.jupiter.api.Test
 import util.addYears
 import util.forEachAsyncCoroutine
 import java.util.*
+import kotlin.coroutines.CoroutineContext
 
 // Keep BlockingDatabaseTests and SuspendingDatabaseTests in sync, and only change getCollection with getSuspendingCollection
 class SuspendingDatabaseTests {
@@ -828,6 +834,70 @@ class SuspendingDatabaseTests {
     }
   }
 
+  @Test
+  fun sentryTracing() = runBlocking {
+    Sentry.init { options: SentryOptions ->
+      options.dsn = "http://1@localhost:8000/1" // A "valid" dsn is required, otherwise tracing info will not be collected
+      options.tracesSampleRate = 1.0
+      // options.isDebug = true
+    }
+
+    val transaction = Sentry.startTransaction("Root Transaction", "root")
+
+    val localTestDb = createDb(
+      autoCreate = false,
+      getOrCreateSentrySpan = { _, name -> transaction.startChild("db", name) }
+    )
+    localTestDb.getSuspendingCollection<SimpleMongoPayload>().clear()
+
+    localTestDb.getSuspendingCollection<SimpleMongoPayload>().bulkWrite {
+      repeat(10) { index ->
+        insertOne(SimpleMongoPayload().apply {
+          _id = index.toString()
+          double = index.toDouble()
+          string = index.toString()
+        }, upsert = false)
+      }
+    }
+
+    coroutineScope {
+      repeat(5) {
+        localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+          .find()
+          .batchSize(2)
+          .toList()
+
+        localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+          .findOne(SimpleMongoPayload::_id equal "5")
+      }
+
+      repeat(5) {
+        launch {
+          localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+            .find()
+            .batchSize(2)
+            .toList()
+        }
+
+        launch {
+          localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+            .findOne(SimpleMongoPayload::_id equal "5")
+        }
+      }
+    }
+
+    transaction.finish()
+    Sentry.flush(5_000)
+
+    val baseName = localTestDb.getSuspendingCollection<SimpleMongoPayload>().blockingCollection.internalCollection.namespace.fullName
+    assertEquals(22, transaction.spans.count { it.operation == "db" }) // one span for each of the above db function calls
+    assertEquals(10, transaction.spans.count { it.description == "$baseName.find" })
+    assertEquals(50, transaction.spans.count { it.description!!.contains("getMore") }) // 5 (10 items, batch size 2) getMore for each find
+    assertEquals(10, transaction.spans.count { it.description == "$baseName.findOne" })
+    assertEquals(
+      72,
+      transaction.spans.count { it.operation == "db.query" }) // one span for each of the above db function calls + 50 getMore commands
+  }
 
   companion object {
     lateinit var testDb: MongoDatabase
@@ -836,20 +906,31 @@ class SuspendingDatabaseTests {
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {
-      testDb = MongoDatabase("mongodb://localhost:27017/local") {
-        collection<EnumMongoPayload>("enumColl") {
-          index(EnumMongoPayload::value1.ascending())
-          index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
-          index(
-            EnumMongoPayload::nullableString.ascending(), partialIndex = arrayOf(
-              EnumMongoPayload::nullableString equal null
-            )
+      testDb = createDb()
+    }
+
+    private fun createDb(
+      autoCreate: Boolean = true,
+      getOrCreateSentrySpan: ((context: CoroutineContext?, name: String) -> ISpan?)? = null
+    ) = MongoDatabase(
+      uri = "mongodb://localhost:27017/local",
+      autoCreateCollections = autoCreate,
+      autoCreateIndexes = autoCreate,
+      autoDeleteIndexes = autoCreate,
+      createSentrySpan = getOrCreateSentrySpan,
+    ) {
+      collection<EnumMongoPayload>("enumColl") {
+        index(EnumMongoPayload::value1.ascending())
+        index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
+        index(
+          EnumMongoPayload::nullableString.ascending(), partialIndex = arrayOf(
+            EnumMongoPayload::nullableString equal null
           )
-        }
-        collection<SimpleMongoPayload>("simpleMongoColl")
-        collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
-        collection<OpenClassMongoPayload>("simpleMongoColl")
+        )
       }
+      collection<SimpleMongoPayload>("simpleMongoColl")
+      collection<NullableSimpleMongoPayload>("simpleMongoColl") // Use the same underlying mongoDb collection as SimpleMongoPayload
+      collection<OpenClassMongoPayload>("simpleMongoColl")
     }
   }
 }

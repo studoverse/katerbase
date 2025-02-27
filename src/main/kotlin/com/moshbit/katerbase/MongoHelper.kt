@@ -4,7 +4,7 @@ import com.mongodb.client.model.Accumulators
 import com.mongodb.client.model.Aggregates
 import com.mongodb.client.model.BsonField
 import com.mongodb.client.model.Projections
-import org.bson.Document
+import org.bson.*
 import org.bson.conversions.Bson
 import java.security.SecureRandom
 import java.util.*
@@ -81,11 +81,33 @@ fun Array<out MongoPair>.toFilterDocument(): Document {
         value.forEach { innerKey, innerValue -> innerBson[innerKey] = innerValue }
         bson[key.name] = innerBson // Add merged Document to outer Document
       }
+
       else -> bson[key.name] = value
     }
   }
   return bson
 }
+
+fun BsonDocument.toParameterizedJson(): String = toParameterizedBson(this, topLevel = true).toJson()
+
+private fun parameterizeValue(value: BsonValue): BsonValue {
+  return when (value) {
+    is BsonDocument -> toParameterizedBson(value) // Recursive for nested docs
+    is BsonArray -> BsonArray(value.values.map { parameterizeValue(it) }) // Recursive for arrays
+    else -> BsonString("?") // Replace other values with "?"
+  }
+}
+
+private val ignoredParameterizeKeys = setOf("readConcern", "\$db", "lsid", "\$readPreference")
+private fun toParameterizedBson(bson: BsonDocument, topLevel: Boolean = false): BsonDocument {
+  val parameterizedDoc = BsonDocument()
+  for ((key, value) in bson) {
+    if (topLevel && key in ignoredParameterizeKeys) continue
+    parameterizedDoc[key] = parameterizeValue(value)
+  }
+  return parameterizedDoc
+}
+
 
 class SubDocumentListFilter(vararg val filter: FilterPair)
 
