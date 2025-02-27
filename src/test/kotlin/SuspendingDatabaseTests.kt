@@ -846,7 +846,7 @@ class SuspendingDatabaseTests {
 
     val localTestDb = createDb(
       autoCreate = false,
-      getOrCreateSentrySpan = { transaction.startChild("db") }
+      getOrCreateSentrySpan = { _, name -> transaction.startChild("db", name) }
     )
     localTestDb.getSuspendingCollection<SimpleMongoPayload>().clear()
 
@@ -911,7 +911,7 @@ class SuspendingDatabaseTests {
 
     private fun createDb(
       autoCreate: Boolean = true,
-      getOrCreateSentrySpan: (CoroutineContext?.(name: String) -> ISpan?)? = null
+      getOrCreateSentrySpan: ((context: CoroutineContext?, name: String) -> ISpan?)? = null
     ) = MongoDatabase(
       uri = "mongodb://localhost:27017/local",
       autoCreateCollections = autoCreate,

@@ -55,7 +55,7 @@ open class MongoDatabase(
   autoCreateIndexes: Boolean = true,
   autoDeleteIndexes: Boolean = true,
   clientSettings: (MongoClientSettings.Builder.() -> Unit)? = null,
-  private val createSentrySpan: (CoroutineContext?.(name: String) -> ISpan?)? = null,
+  private val createSentrySpan: ((context: CoroutineContext?, name: String) -> ISpan?)? = null,
   collections: MongoDatabaseDefinition.() -> Unit
 ) : AbstractMongoDatabase() {
   protected val client: MongoClient
