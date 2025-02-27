@@ -610,13 +610,13 @@ open class MongoDatabase(
             /* clientSession = */ session,
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ Document::class.java
+            /* resultClass = */ entryClass.java
           )
         } else {
           internalCollection.distinct(
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ Document::class.java
+            /* resultClass = */ entryClass.java
           )
         },
         clazz = entryClass
@@ -1142,7 +1142,7 @@ open class MongoDatabase(
           mongoIterable = blockingCollection.internalCollection.distinct(
             /* fieldName = */ distinctField.name,
             /* filter = */ filter.toFilterDocument(),
-            /* resultClass = */ Document::class.java
+            /* resultClass = */ entryClass.java
           ),
           clazz = entryClass,
           tracingContext = tracingContext,

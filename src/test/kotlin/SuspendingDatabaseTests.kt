@@ -1,17 +1,21 @@
 import com.moshbit.katerbase.*
+import io.sentry.ISpan
 import io.sentry.Sentry
 import io.sentry.SentryOptions
-import io.sentry.protocol.SentryTransaction
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import util.addYears
 import util.forEachAsyncCoroutine
 import java.util.*
+import kotlin.coroutines.CoroutineContext
 
 // Keep BlockingDatabaseTests and SuspendingDatabaseTests in sync, and only change getCollection with getSuspendingCollection
 class SuspendingDatabaseTests {
@@ -832,22 +836,19 @@ class SuspendingDatabaseTests {
 
   @Test
   fun sentryTracing() = runBlocking {
-    var latestTransaction: SentryTransaction? = null
     Sentry.init { options: SentryOptions ->
-      options.isEnableExternalConfiguration = true
       options.dsn = "http://1@localhost:8000/1" // A "valid" dsn is required, otherwise tracing info will not be collected
       options.tracesSampleRate = 1.0
-      options.beforeSendTransaction = SentryOptions.BeforeSendTransactionCallback { transaction, hint ->
-        latestTransaction = transaction
-        return@BeforeSendTransactionCallback transaction
-      }
+      // options.isDebug = true
     }
 
-    val transaction = Sentry.startTransaction("Test Transaction", "query")
-    val localTestDb = MongoDatabase(
-      "mongodb://localhost:27017/local",
-      getOrCreateSentrySpan = { transaction }
-    ) { testDbDefinition() }
+    val transaction = Sentry.startTransaction("Root Transaction", "root")
+
+    val localTestDb = createDb(
+      autoCreate = false,
+      getOrCreateSentrySpan = { transaction.startChild("db") }
+    )
+    localTestDb.getSuspendingCollection<SimpleMongoPayload>().clear()
 
     localTestDb.getSuspendingCollection<SimpleMongoPayload>().bulkWrite {
       repeat(10) { index ->
@@ -859,32 +860,65 @@ class SuspendingDatabaseTests {
       }
     }
 
-    val count = localTestDb.getSuspendingCollection<SimpleMongoPayload>().find().batchSize(2).count()
-    println("Found $count items")
+    coroutineScope {
+      repeat(5) {
+        localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+          .find()
+          .batchSize(2)
+          .toList()
+
+        localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+          .findOne(SimpleMongoPayload::_id equal "5")
+      }
+
+      repeat(5) {
+        launch {
+          localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+            .find()
+            .batchSize(2)
+            .toList()
+        }
+
+        launch {
+          localTestDb.getSuspendingCollection<SimpleMongoPayload>()
+            .findOne(SimpleMongoPayload::_id equal "5")
+        }
+      }
+    }
+
     transaction.finish()
+    Sentry.flush(5_000)
 
-    Sentry.flush(1_000)
-
-    assertEquals("Test Transaction", latestTransaction!!.transaction)
-    val span = latestTransaction!!.spans.single { it.op == "db.query" }
-    assertNotNull(span)
-    assertEquals("db.query", span.op)
-    assertEquals("mongodb", span.data!!["db.system"])
-    assertEquals("find", span.data!!["db.operation.name"])
+    val baseName = localTestDb.getSuspendingCollection<SimpleMongoPayload>().blockingCollection.internalCollection.namespace.fullName
+    assertEquals(22, transaction.spans.count { it.operation == "db" }) // one span for each of the above db function calls
+    assertEquals(10, transaction.spans.count { it.description == "$baseName.find" })
+    assertEquals(50, transaction.spans.count { it.description!!.contains("getMore") }) // 5 (10 items, batch size 2) getMore for each find
+    assertEquals(10, transaction.spans.count { it.description == "$baseName.findOne" })
+    assertEquals(
+      72,
+      transaction.spans.count { it.operation == "db.query" }) // one span for each of the above db function calls + 50 getMore commands
   }
-
 
   companion object {
     lateinit var testDb: MongoDatabase
 
-    /*@Suppress("unused")
+    @Suppress("unused")
     @BeforeAll
     @JvmStatic
     fun setup(): Unit = runBlocking {
-      testDb = MongoDatabase("mongodb://localhost:27017/local") { testDbDefinition() }
-    }*/
+      testDb = createDb()
+    }
 
-    private fun MongoDatabaseDefinition.testDbDefinition() {
+    private fun createDb(
+      autoCreate: Boolean = true,
+      getOrCreateSentrySpan: (CoroutineContext?.(name: String) -> ISpan?)? = null
+    ) = MongoDatabase(
+      uri = "mongodb://localhost:27017/local",
+      autoCreateCollections = autoCreate,
+      autoCreateIndexes = autoCreate,
+      autoDeleteIndexes = autoCreate,
+      getOrCreateSentrySpan = getOrCreateSentrySpan,
+    ) {
       collection<EnumMongoPayload>("enumColl") {
         index(EnumMongoPayload::value1.ascending())
         index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
