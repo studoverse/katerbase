@@ -936,15 +936,14 @@ open class MongoDatabase(
       }
 
       /**
-       * Use this if you want to push multiple new items to a set and/or cap the set size to [slice]
+       * Use this if you want to push multiple new items to a set
        * This only works with primitives!!!!
-       * More info: https://docs.mongodb.com/manual/reference/operator/update/addToSet/ and
-       * https://www.mongodb.com/docs/manual/reference/operator/update/slice/
+       * More info: https://docs.mongodb.com/manual/reference/operator/update/addToSet/
        */
       @JvmName("pushToSet")
-      fun <Value> MongoEntryField<Set<Value>>.push(vararg values: Value, slice: Int? = null) {
+      fun <Value> MongoEntryField<Set<Value>>.push(vararg values: Value) {
         @Suppress("DEPRECATION") // Use the hack version because List != Set
-        updateMutator(operator = "addToSet", mutator = PushMultiplePair<Value>(this.toMongoField(), values.toList(), slice))
+        updateMutator(operator = "addToSet", mutator = PushMultiplePair<Value>(this.toMongoField(), values.toList(), slice = null))
       }
 
       /**
