@@ -1,4 +1,4 @@
-name: Check simple unit tests
+name: Check unit tests
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ "master" ]
 
 jobs:
-  test:
+  db-tests:
     runs-on: self-hosted
     env:
       MONGO_URI: ${{ secrets.MONGO_TEST_URI }}
@@ -33,10 +33,10 @@ jobs:
         run: ./gradlew --no-daemon jar
 
       - name: Run MoviesExample
-        run: ./gradlew test --tests "MoviesExample"
+        run: ./gradlew --no-daemon test --tests "MoviesExample"
 
       - name: Run BlockingDatabaseTests
-        run: ./gradlew test --tests "BlockingDatabaseTests"
+        run: ./gradlew --no-daemon test --tests "BlockingDatabaseTests"
 
       - name: Run SuspendingDatabaseTests
-        run: ./gradlew test --tests "SuspendingDatabaseTests"
+        run: ./gradlew --no-daemon test --tests "SuspendingDatabaseTests"
