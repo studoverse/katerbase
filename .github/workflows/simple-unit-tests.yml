@@ -18,7 +18,7 @@ jobs:
       # Optional: sanity check from inside the runner container
       - name: Verify Mongo is reachable
         run: |
-          docker run --rm --network dev-cluster_default nexus.functionaldude.com/library/mongo:7 mongosh "$MONGO_URI" --eval 'db.runCommand({ ping: 1 })'
+          docker run --rm --network ci_network nexus.functionaldude.com/library/mongo:7 mongosh "$MONGO_URI" --eval 'db.runCommand({ ping: 1 })'
 
       - name: Set up JDK
         uses: actions/setup-java@v4
