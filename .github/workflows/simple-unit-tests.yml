@@ -32,11 +32,11 @@ jobs:
       - name: Build project
         run: ./gradlew --no-daemon jar
 
-      - name: Run BlockingDatabaseTests
-        run: ./gradlew test --tests "BlockingDatabaseTests"
-
       - name: Run MoviesExample
         run: ./gradlew test --tests "MoviesExample"
+
+      - name: Run BlockingDatabaseTests
+        run: ./gradlew test --tests "BlockingDatabaseTests"
 
       - name: Run SuspendingDatabaseTests
         run: ./gradlew test --tests "SuspendingDatabaseTests"
