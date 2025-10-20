@@ -1,0 +1,42 @@
+name: Check simple unit tests
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  test:
+    runs-on: self-hosted
+    env:
+      MONGO_URI: ${{ secrets.MONGO_TEST_URI }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Optional: sanity check from inside the runner container
+      - name: Verify Mongo is reachable
+        run: |
+          docker run --rm --network dev-cluster_default nexus.functionaldude.com/library/mongo:7 mongosh "$MONGO_URI" --eval 'db.runCommand({ ping: 1 })'
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Build project
+        run: ./gradlew --no-daemon jar
+
+      - name: Run BlockingDatabaseTests
+        run: ./gradlew test --tests "BlockingDatabaseTests"
+
+      - name: Run MoviesExample
+        run: ./gradlew test --tests "MoviesExample"
+
+      - name: Run SuspendingDatabaseTests
+        run: ./gradlew test --tests "SuspendingDatabaseTests"

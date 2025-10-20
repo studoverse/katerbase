@@ -106,7 +106,7 @@ class MoviesExample {
     @BeforeAll
     @JvmStatic
     fun setup() {
-      database = MongoDatabase("mongodb://localhost:27017/moviesDatabase") {
+      database = MongoDatabase(System.getenv("MONGO_URI")?.takeIf { it.isNotBlank() } ?: "mongodb://localhost:27017/moviesDatabase") {
         collection<Movie>("movies") {
           index(Movie::name.textIndex())
         }

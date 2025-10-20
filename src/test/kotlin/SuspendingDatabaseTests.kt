@@ -913,7 +913,7 @@ class SuspendingDatabaseTests {
       autoCreate: Boolean = true,
       getOrCreateSentrySpan: ((context: CoroutineContext?, name: String) -> ISpan?)? = null
     ) = MongoDatabase(
-      uri = "mongodb://localhost:27017/local",
+      uri = System.getenv("MONGO_URI")?.takeIf { it.isNotBlank() } ?: "mongodb://localhost:27017/local",
       autoCreateCollections = autoCreate,
       autoCreateIndexes = autoCreate,
       autoDeleteIndexes = autoCreate,

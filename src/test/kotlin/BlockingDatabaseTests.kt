@@ -789,7 +789,7 @@ class BlockingDatabaseTests {
     @BeforeAll
     @JvmStatic
     fun setup() {
-      testDb = MongoDatabase("mongodb://localhost:27017/local") {
+      testDb = MongoDatabase(System.getenv("MONGO_URI")?.takeIf { it.isNotBlank() } ?: "mongodb://localhost:27017/local") {
         collection<EnumMongoPayload>("enumColl") {
           index(EnumMongoPayload::value1.ascending())
           index(EnumMongoPayload::value1.ascending(), EnumMongoPayload::date.ascending())
