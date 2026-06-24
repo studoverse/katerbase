@@ -585,8 +585,13 @@ open class MongoDatabase(
       return find(*filter).limit(1).firstOrNull()
     }
 
-    // Returns a document or inserts the document and then returns it.
-    // This works atomically, so newEntry may be called even if the document exists
+    /**
+     * Returns a document or inserts the document and then returns it.
+     * This works atomically, so newEntry may be called even if the document exists.
+     * To avoid multiple inserts, the [filter] field(s) must be uniquely indexed!
+     * @see findOne
+     * @see updateOneAndFind
+     */
     fun findOneOrInsert(vararg filter: FilterPair, newEntry: () -> Entry): Entry {
       require(filter.isNotEmpty()) { "A filter must be provided when interacting with only one object." }
 
@@ -670,6 +675,10 @@ open class MongoDatabase(
       }
     }
 
+    /**
+     * With [upsert] = true, the [filter] field(s) must be uniquely indexed, to avoid multiple upserts.
+     * More info: https://www.mongodb.com/docs/manual/reference/method/db.collection.findOneAndUpdate (upsert parameter)
+     */
     fun updateOneAndFind(
       vararg filter: FilterPair,
       upsert: Boolean = false,
